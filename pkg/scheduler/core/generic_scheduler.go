@@ -109,14 +109,17 @@ type genericScheduler struct {
 // Schedule tries to schedule the given pod to one of the nodes in the node list.
 // If it succeeds, it will return the name of the node.
 // If it fails, it will return a FitError error with reasons.
+// 函数的结果是返回选出来的被调度到的节点名字
 func (g *genericScheduler) Schedule(pod *v1.Pod, nodeLister algorithm.NodeLister) (string, error) {
 	trace := utiltrace.New(fmt.Sprintf("Scheduling %s/%s", pod.Namespace, pod.Name))
 	defer trace.LogIfLong(100 * time.Millisecond)
 
+	//对待调度Pod进行基础检查，主要是volumes 和 deletetimestamp
 	if err := podPassesBasicChecks(pod, g.pvcLister); err != nil {
 		return "", err
 	}
 
+	//获取节点列表
 	nodes, err := nodeLister.List()
 	if err != nil {
 		return "", err
@@ -133,6 +136,9 @@ func (g *genericScheduler) Schedule(pod *v1.Pod, nodeLister algorithm.NodeLister
 
 	trace.Step("Computing predicates")
 	startPredicateEvalTime := time.Now()
+
+	//预选
+	//g.schedulerQueue即待调度PodQueue，todo： 这些pod是什么被塞进去的？
 	filteredNodes, failedPredicateMap, err := findNodesThatFit(pod, g.cachedNodeInfoMap, nodes, g.predicates, g.extenders, g.predicateMetaProducer, g.equivalenceCache, g.schedulingQueue, g.alwaysCheckAllPredicates)
 	if err != nil {
 		return "", err
@@ -150,12 +156,16 @@ func (g *genericScheduler) Schedule(pod *v1.Pod, nodeLister algorithm.NodeLister
 	trace.Step("Prioritizing")
 	startPriorityEvalTime := time.Now()
 	// When only one node after predicate, just use it.
+	//预选时候如何只选出了一个合适节点，那么就不在进行优选，而是直接返回
 	if len(filteredNodes) == 1 {
 		metrics.SchedulingAlgorithmPriorityEvaluationDuration.Observe(metrics.SinceInMicroseconds(startPriorityEvalTime))
 		return filteredNodes[0].Name, nil
 	}
 
 	metaPrioritiesInterface := g.priorityMetaProducer(pod, g.cachedNodeInfoMap)
+
+	//按照一定规则，给预选出来的node节点进行打分
+	//和预选时有预选函数一样，在优选环节也有各个优选函数(prioritizers)， 最终按照优选函数得出每个node的得分存在priorityList数据结构中。
 	priorityList, err := PrioritizeNodes(pod, g.cachedNodeInfoMap, metaPrioritiesInterface, g.prioritizers, filteredNodes, g.extenders)
 	if err != nil {
 		return "", err
@@ -163,6 +173,7 @@ func (g *genericScheduler) Schedule(pod *v1.Pod, nodeLister algorithm.NodeLister
 	metrics.SchedulingAlgorithmPriorityEvaluationDuration.Observe(metrics.SinceInMicroseconds(startPriorityEvalTime))
 
 	trace.Step("Selecting host")
+	//从包含得分信息的node中选择得分最高的节点作为本次调度的结果
 	return g.selectHost(priorityList)
 }
 
@@ -286,6 +297,15 @@ func (g *genericScheduler) getLowerPriorityNominatedPods(pod *v1.Pod, nodeName s
 
 // Filters the nodes to find the ones that fit based on the given predicate functions
 // Each node is passed through the predicate functions to determine if it is a fit
+// 按照给定的predicateFuncs函数从所有的node中过滤出来所有符合条件的nodes
+// algorithm.FitPredicate是在 init函数中通过 registerAlgorithmProvider --> defaultPredicates()
+// 注册为默认的predicate的。（kubernetes/pkg/scheduler/algorithmprovider/defaults/defaults.go， line：112）
+// 这些函数名统一为 xxxxPred, 例如：
+// 1. MatchInterPodAffinityPred： podaffinity亲和性预选函数
+// 2. NoDiskConflictPred: diskconflict预选函数
+// 3. CheckNodeMemoryPressurePred: node内存预选函数
+// 4. CheckNodeDiskPressurePred： node磁盘压力预选函数
+// 更完整的predicate函数可见 k8s.io/kubernetes/pkg/scheduler/algorithm/predicates/predicates.go
 func findNodesThatFit(
 	pod *v1.Pod,
 	nodeNameToInfo map[string]*schedulercache.NodeInfo,
@@ -321,6 +341,7 @@ func findNodesThatFit(
 
 		checkNode := func(i int) {
 			nodeName := nodes[i].Name
+			//podFitsOnNode检查一个以NodeInfo形式提供的node是否能够通过给定的predicate functions筛选
 			fits, failedPredicates, err := podFitsOnNode(
 				pod,
 				meta,
@@ -337,6 +358,9 @@ func findNodesThatFit(
 				predicateResultLock.Unlock()
 				return
 			}
+
+			//如果该节点合适，那么就增加 filteredLen数目，即通过了checkNode逻辑的node节点数
+			//那么将该node信息保存在filtered中。
 			if fits {
 				filtered[atomic.AddInt32(&filteredLen, 1)-1] = nodes[i]
 			} else {
@@ -345,6 +369,8 @@ func findNodesThatFit(
 				predicateResultLock.Unlock()
 			}
 		}
+
+		//起16个goroutine， 来并发的去判断len(nodes)是否符合该Pod的调度条件
 		workqueue.Parallelize(16, len(nodes), checkNode)
 		filtered = filtered[:filteredLen]
 		if len(errs) > 0 {
@@ -455,6 +481,9 @@ func podFitsOnNode(
 	for i := 0; i < 2; i++ {
 		metaToUse := meta
 		nodeInfoToUse := info
+
+		//第一次循环时，从schedulerQueue中找出是否含有比该调度Pod优先级更高 或者 平级的Pod， 如果有则将其加入至nodeInfoToUse中，然后继续下面的逻辑
+		//第二次循环时，如果第一次循环并没有增加更高级别的Pod,或者第一次循环时出现了预选错误（len(failedPredicated) !+ 0）,则直接结束本次循环
 		if i == 0 {
 			podsAdded, metaToUse, nodeInfoToUse = addNominatedPods(util.GetPodPriority(pod), meta, info, queue)
 		} else if !podsAdded || len(failedPredicates) != 0 {
