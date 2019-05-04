@@ -24,6 +24,8 @@ import (
 )
 
 // Indexer is a storage interface that lets you list objects using multiple indexing functions
+// indexer是一个接口集合，在store的基础上扩展了索引能力。方便的让用户list 各种objects
+// indexer的一种实现 client-go/tools/cache/store.go
 type Indexer interface {
 	Store
 	// Retrieve list of objects that match on the named indexing function
@@ -77,11 +79,20 @@ func MetaNamespaceIndexFunc(obj interface{}) ([]string, error) {
 	return []string{meta.GetNamespace()}, nil
 }
 
+//需要区分索引key，对象key
+//例如 indexName = "byUser", indexKey = "wooniu", objKey = "pod1"
+
 // Index maps the indexed value to a set of keys in the store that match on that value
+// 比如找Podname有很多维度， 比如某一个namespace的所有podname，同一个节点的所有podname， 同一个service的所有podname...
+// 所有Index的key表示的一个维度。
+// 例如： Index = {"ivanka":[]string{"pod1","pod2"}}, {"wits":[]string{"pod3","pod4"}}
+// "ivanka", "wits" 都是按照NsIndexFunc(obj)生成的
 type Index map[string]sets.String
 
 // Indexers maps a name to a IndexFunc
+// 例如 Indexers = {"byUser": UsersIndexFunc，"byNamespace":NsIndexFunc}
 type Indexers map[string]IndexFunc
 
 // Indices maps a name to an Index
+// 例如： Indices = {"byNamespace":{"ivanka":{"pod1","pod2"},"wits":{"pod3","pod4"}}}
 type Indices map[string]Index

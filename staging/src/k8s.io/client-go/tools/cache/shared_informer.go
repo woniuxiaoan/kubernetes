@@ -186,9 +186,11 @@ type deleteNotification struct {
 	oldObj interface{}
 }
 
+//开始运行该informer，这是各种informer运行的入口函数。
 func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
 
+	//创建一个新的DeltaFiFo， 留意里面的s.indexer
 	fifo := NewDeltaFIFO(MetaNamespaceKeyFunc, s.indexer)
 
 	cfg := &Config{
@@ -199,7 +201,7 @@ func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
 		RetryOnError:     false,
 		ShouldResync:     s.processor.shouldResync,
 
-		Process: s.HandleDeltas,
+		Process: s.HandleDeltas, //设定处理pop出的deltas的函数
 	}
 
 	func() {
@@ -224,6 +226,8 @@ func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
 		defer s.startedLock.Unlock()
 		s.stopped = true // Don't want any new listeners
 	}()
+
+	//启动控制器,从stopCh可以看出正常情况下是一个死循环。
 	s.controller.Run(stopCh)
 }
 
@@ -341,6 +345,7 @@ func (s *sharedIndexInformer) AddEventHandlerWithResyncPeriod(handler ResourceEv
 	}
 }
 
+//这个函数就是在DeltaFifo在执行Pop操作时，负责处理pop出的deltas的。
 func (s *sharedIndexInformer) HandleDeltas(obj interface{}) error {
 	s.blockDeltas.Lock()
 	defer s.blockDeltas.Unlock()
@@ -351,6 +356,8 @@ func (s *sharedIndexInformer) HandleDeltas(obj interface{}) error {
 		case Sync, Added, Updated:
 			isSync := d.Type == Sync
 			s.cacheMutationDetector.AddObject(d.Object)
+			//如果是Sync、add、update action， localstore没有找到该delta对象，则添加值localstore，否则则更新本地localstore。
+			//然后通知处理器处理事件
 			if old, exists, err := s.indexer.Get(d.Object); err == nil && exists {
 				if err := s.indexer.Update(d.Object); err != nil {
 					return err
@@ -362,6 +369,7 @@ func (s *sharedIndexInformer) HandleDeltas(obj interface{}) error {
 				}
 				s.processor.distribute(addNotification{newObj: d.Object}, isSync)
 			}
+		//如果是delete action，则删除本地localstore中的对象。然后通知处理器处理事件。
 		case Deleted:
 			if err := s.indexer.Delete(d.Object); err != nil {
 				return err

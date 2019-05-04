@@ -66,10 +66,12 @@ type threadSafeMap struct {
 }
 
 func (c *threadSafeMap) Add(key string, obj interface{}) {
+	// 因为是线程安全的，所以此处需要加锁
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	oldObject := c.items[key]
 	c.items[key] = obj
+	// 因为添加了新对象，所以需要更新索引
 	c.updateIndices(oldObject, obj, key)
 }
 
@@ -165,6 +167,9 @@ func (c *threadSafeMap) Index(indexName string, obj interface{}) ([]interface{},
 }
 
 // ByIndex returns a list of items that match an exact value on the index function
+// example：indexName="byUser", indexKey="wooniu"; indexName="byNamespace", indexKey="ivanka"
+// 结果就是该对象的集合， 例如Pod的cache， 那么ByIndex("byUser","wooniu")得到的就是用户是wooniu的所有Pod
+// ByIndex("byNamespace","ivanka") 得到的就是ivanka namespace下的所有Pod的对象key
 func (c *threadSafeMap) ByIndex(indexName, indexKey string) ([]interface{}, error) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
@@ -187,6 +192,8 @@ func (c *threadSafeMap) ByIndex(indexName, indexKey string) ([]interface{}, erro
 
 // IndexKeys returns a list of keys that match on the index function.
 // IndexKeys is thread-safe so long as you treat all items as immutable.
+// 例如： indexName = "byUser", indexKey = "woniu"
+// 大体过程： 从indice结果中按照indexName找到index，然后从index中按照indexKey找到结果
 func (c *threadSafeMap) IndexKeys(indexName, indexKey string) ([]string, error) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
@@ -202,6 +209,8 @@ func (c *threadSafeMap) IndexKeys(indexName, indexKey string) ([]string, error) 
 	return set.List(), nil
 }
 
+// indexName 指的是 "byUser"，"byNamespace"之类
+// 返回结果是[]string{"ivanka","wtis"} 之类的结果
 func (c *threadSafeMap) ListIndexFuncValues(indexName string) []string {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
@@ -222,6 +231,7 @@ func (c *threadSafeMap) AddIndexers(newIndexers Indexers) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
+	//说明当前缓存中有数据，此时禁止增加新indexer
 	if len(c.items) > 0 {
 		return fmt.Errorf("cannot add indexers to running index")
 	}
@@ -241,22 +251,59 @@ func (c *threadSafeMap) AddIndexers(newIndexers Indexers) error {
 
 // updateIndices modifies the objects location in the managed indexes, if this is an update, you must provide an oldObj
 // updateIndices must be called from a function that already has a lock on the cache
+// 以Pod cache为例子，woniuxiaoan/kubernetes/staging/src/k8s.io/client-go/tools/cache/index_test.go
 func (c *threadSafeMap) updateIndices(oldObj interface{}, newObj interface{}, key string) {
 	// if we got an old object, we need to remove it before we add it again
 	if oldObj != nil {
 		c.deleteFromIndices(oldObj, key)
 	}
+
+/*
+
+以下面例子作为参考理解indexers, indices, index
+func testUsersIndexFunc(obj interface{}) ([]string, error) {
+	pod := obj.(*v1.Pod)
+	usersString := pod.Annotations["users"]
+	return strings.Split(usersString, ","), nil
+}
+
+func TestMultiIndexKeys(t *testing.T) {
+	index := NewIndexer(MetaNamespaceKeyFunc, Indexers{"byUser": testUsersIndexFunc})
+	pod1 := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "one", Annotations: map[string]string{"users": "ernie,bert"}}}
+	pod2 := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "two", Annotations: map[string]string{"users": "bert,oscar"}}}
+	index.Add(pod1)
+	index.Add(pod2)
+}
+
+*/
 	for name, indexFunc := range c.indexers {
+		// 此时indexFunc = testUsersIndexFunc， indexValues = []string{"ernie","bert"}
 		indexValues, err := indexFunc(newObj)
 		if err != nil {
 			panic(fmt.Errorf("unable to calculate an index entry for key %q on index %q: %v", key, name, err))
 		}
 		index := c.indices[name]
+
+		//name = "byUser"
 		if index == nil {
 			index = Index{}
 			c.indices[name] = index
 		}
 
+		/*  例子：
+			index = map[string]set.strings {
+				"ernie": []string{"one"}
+				"bert":  []string{"one","two"}
+				"oscar": []string{"two"}
+			 }
+			c.indices = map[string]map[string]sets.String{
+				"byUser": map[string]set.strings{
+					"ernie": []string{"one"}
+					"bert":  []string{"one","two"}
+					"oscar": []string{"one"}
+				}
+			}
+		*/
 		for _, indexValue := range indexValues {
 			set := index[indexValue]
 			if set == nil {
