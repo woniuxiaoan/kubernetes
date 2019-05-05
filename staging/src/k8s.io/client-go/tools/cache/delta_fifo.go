@@ -476,6 +476,7 @@ func (f *DeltaFIFO) Pop(process PopProcessFunc) (interface{}, error) {
 // 'f' takes ownership of the map, you should not reference the map again
 // after calling this function. f's queue is reset, too; upon return, it
 // will contain the items in the map, in no particular order.
+// 只有Replace函数能触发initialPopulationCount ++
 func (f *DeltaFIFO) Replace(list []interface{}, resourceVersion string) error {
 	f.lock.Lock()
 	defer f.lock.Unlock()
@@ -601,6 +602,8 @@ func (f *DeltaFIFO) syncKeyLocked(key string) error {
 	if err != nil {
 		return KeyError{obj, err}
 	}
+
+	// fifo中已经与该对象的相关delta，则忽略本次更新， 因为以后会更新
 	if len(f.items[id]) > 0 {
 		return nil
 	}
