@@ -56,6 +56,7 @@ import (
 //       and internal tests.
 //
 // Also see the comment on DeltaFIFO.
+// keyFunc为对象生成一个key, knownObjects 是一个interface，informer使用时其实就是 indexer（localstore）
 func NewDeltaFIFO(keyFunc KeyFunc, knownObjects KeyListerGetter) *DeltaFIFO {
 	f := &DeltaFIFO{
 		items:        map[string]Deltas{},
@@ -93,6 +94,8 @@ func NewDeltaFIFO(keyFunc KeyFunc, knownObjects KeyListerGetter) *DeltaFIFO {
 // items have been deleted when Replace() or Delete() are called. The deleted
 // object will be included in the DeleteFinalStateUnknown markers. These objects
 // could be stale.
+// DeltaFIFO就是一个按序的(先入先出)kubernetes对象变化的队列,基本操作单位是Delta
+// DeltaFIFO是Queue一种实现
 type DeltaFIFO struct {
 	// lock/cond protects access to 'items' and 'queue'.
 	lock sync.RWMutex
@@ -106,8 +109,10 @@ type DeltaFIFO struct {
 
 	// populated is true if the first batch of items inserted by Replace() has been populated
 	// or Delete/Add/Update was called first.
+	// 当第一次由Replace插入的数据被populated 或者 第一次执行 Delete/Add/Update时，该标志位置位
 	populated bool
 	// initialPopulationCount is the number of items inserted by the first call of Replace()
+	//表示第一次调用Replace时插入queue的item数量
 	initialPopulationCount int
 
 	// keyFunc is used to make the key used for queued item
@@ -162,6 +167,7 @@ func (f *DeltaFIFO) KeyOf(obj interface{}) (string, error) {
 
 // Return true if an Add/Update/Delete/AddIfNotPresent are called first,
 // or an Update called first but the first batch of items inserted by Replace() has been popped
+// 说明此次数据已经完全同步至了localstore
 func (f *DeltaFIFO) HasSynced() bool {
 	f.lock.Lock()
 	defer f.lock.Unlock()
@@ -258,6 +264,10 @@ func (f *DeltaFIFO) addIfNotPresent(id string, deltas Deltas) {
 
 // re-listing and watching can deliver the same update multiple times in any
 // order. This will combine the most recent two deltas if they are the same.
+//DeltaFIFO生产者和消费者是异步的，如果一个目标的频繁操作，前面操作还缓存在队列中的时候，后面的操作已经又
+//进入到了队列中，此时就需要相关合并操作。更新操作是没有办法合并的（why??），能合并的只有多次删除 或者 多次
+//添加同一个对象，因为多次添加同一个对象apiserver会确保唯一性，所以这里就不需要去重了。此时就剩了多次删除
+//需要去重。
 func dedupDeltas(deltas Deltas) Deltas {
 	n := len(deltas)
 	if n < 2 {
@@ -265,6 +275,7 @@ func dedupDeltas(deltas Deltas) Deltas {
 	}
 	a := &deltas[n-1]
 	b := &deltas[n-2]
+	//
 	if out := isDup(a, b); out != nil {
 		d := append(Deltas{}, deltas[:n-2]...)
 		return append(d, *out)
@@ -313,6 +324,7 @@ func (f *DeltaFIFO) queueActionLocked(actionType DeltaType, obj interface{}) err
 	// If object is supposed to be deleted (last event is Deleted),
 	// then we should ignore Sync events, because it would result in
 	// recreation of this object.
+	// willObjectBeDeletedLocked = true表示该对象最新的一次操作是删除，同步对于已删除的对象来讲是没有意义的
 	if actionType == Sync && f.willObjectBeDeletedLocked(id) {
 		return nil
 	}
@@ -428,8 +440,11 @@ func (f *DeltaFIFO) Pop(process PopProcessFunc) (interface{}, error) {
 				return nil, FIFOClosedError
 			}
 
+			//queueActionLocked, closeFifo逻辑会broadcast信号。
 			f.cond.Wait()
 		}
+
+		//下面这个是先进先出逻辑的实现
 		id := f.queue[0]
 		f.queue = f.queue[1:]
 		item, ok := f.items[id]
@@ -441,7 +456,12 @@ func (f *DeltaFIFO) Pop(process PopProcessFunc) (interface{}, error) {
 			continue
 		}
 		delete(f.items, id)
+
+		//处理本次Pop的item，这个是初始化时注册进去的。
+		//当我们创建
 		err := process(item)
+
+		//如果处理出错，需要重新入队，则重新入队
 		if e, ok := err.(ErrRequeue); ok {
 			f.addIfNotPresent(id, item)
 			err = e.Err
@@ -456,11 +476,13 @@ func (f *DeltaFIFO) Pop(process PopProcessFunc) (interface{}, error) {
 // 'f' takes ownership of the map, you should not reference the map again
 // after calling this function. f's queue is reset, too; upon return, it
 // will contain the items in the map, in no particular order.
+// 只有Replace函数能触发initialPopulationCount ++
 func (f *DeltaFIFO) Replace(list []interface{}, resourceVersion string) error {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 	keys := make(sets.String, len(list))
 
+	//Replace就是同步用的，所以他产生的事件都是Sync
 	for _, item := range list {
 		key, err := f.KeyOf(item)
 		if err != nil {
@@ -472,12 +494,14 @@ func (f *DeltaFIFO) Replace(list []interface{}, resourceVersion string) error {
 		}
 	}
 
+	//todo 什么时候 knowObject是nil？
 	if f.knownObjects == nil {
 		// Do deletion detection against our own list.
 		for k, oldItem := range f.items {
 			if keys.Has(k) {
 				continue
 			}
+			// 说明了deltafifo这个key 不在本次的replace中。
 			var deletedObj interface{}
 			if n := oldItem.Newest(); n != nil {
 				deletedObj = n.Object
@@ -487,6 +511,8 @@ func (f *DeltaFIFO) Replace(list []interface{}, resourceVersion string) error {
 			}
 		}
 
+		//如果populated还没有设置，说明这是第一次replace且并没有ADD/UPDATE/DELETE操作执行。
+		//因为ADD/UPDATE/DELETE操作都会设置populated
 		if !f.populated {
 			f.populated = true
 			f.initialPopulationCount = len(list)
@@ -496,13 +522,20 @@ func (f *DeltaFIFO) Replace(list []interface{}, resourceVersion string) error {
 	}
 
 	// Detect deletions not already in the queue.
+	// 从localstore拿到所有的key
 	knownKeys := f.knownObjects.ListKeys()
 	queuedDeletions := 0
+
+
+	// 遍历localstore里面的key， 如果里面有而replace全量数据中没有，则为该对象产生一个deleted delta
 	for _, k := range knownKeys {
+		//如果localstore的key在本次的replace的items中，则继续
 		if keys.Has(k) {
 			continue
 		}
 
+		//如果localstore中的某个key不在此次replace items中，因为replace拿到的是全量数据，所以
+		//对于localstore中就应该删除这个对象，所以此时就产生一个针对该key的Deleted action
 		deletedObj, exists, err := f.knownObjects.GetByKey(k)
 		if err != nil {
 			deletedObj = nil
@@ -526,6 +559,7 @@ func (f *DeltaFIFO) Replace(list []interface{}, resourceVersion string) error {
 }
 
 // Resync will send a sync event for each item
+// 该函数遍历本地localstore，然后将其写入deltafifo从而实现localstore内容的定期全量更新。
 func (f *DeltaFIFO) Resync() error {
 	f.lock.Lock()
 	defer f.lock.Unlock()
@@ -568,6 +602,8 @@ func (f *DeltaFIFO) syncKeyLocked(key string) error {
 	if err != nil {
 		return KeyError{obj, err}
 	}
+
+	// fifo中已经与该对象的相关delta，则忽略本次更新， 因为以后会更新
 	if len(f.items[id]) > 0 {
 		return nil
 	}
@@ -613,6 +649,7 @@ const (
 //
 // [*] Unless the change is a deletion, and then you'll get the final
 //     state of the object before it was deleted.
+// Delta是DeltaFIFO操作的基本单位，Delta对象有四种类型:"Added"，"Updated","Deleted","Sync"
 type Delta struct {
 	Type   DeltaType
 	Object interface{}

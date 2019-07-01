@@ -109,6 +109,7 @@ func SplitMetaNamespaceKey(key string) (namespace, name string, err error) {
 // cache responsibilities are limited to:
 //	1. Computing keys for objects via keyFunc
 //  2. Invoking methods of a ThreadSafeStorage interface
+// cache是indexer的一种实现
 type cache struct {
 	// cacheStorage bears the burden of thread safety for the cache
 	cacheStorage ThreadSafeStore

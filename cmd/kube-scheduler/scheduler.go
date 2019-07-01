@@ -31,6 +31,8 @@ import (
 	_ "k8s.io/kubernetes/pkg/version/prometheus"        // for version metric registration
 )
 
+//单节点提速： 优选阶段不是选取全量的预选结果，而是随机选取其中的一部分，来提供单节点速度。
+//scheduler节点优化点：水平扩展scheduler节点，pod通过一定负载均衡算法来选择具体的scheduler，提供调度效率
 func main() {
 	rand.Seed(time.Now().UTC().UnixNano())
 

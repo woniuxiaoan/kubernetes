@@ -97,6 +97,7 @@ func New(c *Config) Controller {
 // Run begins processing items, and will continue until a value is sent down stopCh.
 // It's an error to call Run more than once.
 // Run blocks; call via go.
+// 这是一个死循环，controller是连接reflector，deltafifo， localstore的关键。
 func (c *controller) Run(stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
 	go func() {
@@ -119,8 +120,10 @@ func (c *controller) Run(stopCh <-chan struct{}) {
 	var wg wait.Group
 	defer wg.Wait()
 
+	//创建一个reflector，并启动
 	wg.StartWithChannel(stopCh, r.Run)
 
+	//一个死循环，用于调用deltafifo的pop函数， 从而完成从deltafifo弹出数据后的各种逻辑
 	wait.Until(c.processLoop, time.Second, stopCh)
 }
 

@@ -53,13 +53,17 @@ type Reflector struct {
 	metrics *reflectorMetrics
 
 	// The type of object we expect to place in the store.
+	// listwatch的对象类型，比如我们创建的deployment informer，那么这个类型就是deployment
 	expectedType reflect.Type
 	// The destination to sync up with the watch source
+	// 就是DeltaFIFO
 	store Store
 	// listerWatcher is used to perform lists and watches.
 	listerWatcher ListerWatcher
 	// period controls timing between one watch ending and
 	// the beginning of the next one.
+	// 发射器在List和Watch的时候理论是是个死循环，只有出现错误才会退出。
+	// 这个变量控制出错后多久再次进行listandwatch
 	period       time.Duration
 	resyncPeriod time.Duration
 	ShouldResync func() bool
@@ -68,6 +72,8 @@ type Reflector struct {
 	// lastSyncResourceVersion is the resource version token last
 	// observed when doing a sync with the underlying store
 	// it is thread safe, but not synchronized with the underlying store
+	// k8资源在apiserver中都是有版本的，对象的添加，删除，更新都会造成资源版本的更新，
+	// 最后一次同步的资源版本。
 	lastSyncResourceVersion string
 	// lastSyncResourceVersionMutex guards read/write access to lastSyncResourceVersion
 	lastSyncResourceVersionMutex sync.RWMutex
@@ -198,6 +204,7 @@ func extractStackCreator() (string, int, bool) {
 
 // Run starts a watch and handles watch events. Will restart the watch if it is closed.
 // Run will exit when stopCh is closed.
+// 启动reflector，然后reflector就会监听api-server的变化，将数据持续写入deltafifo中
 func (r *Reflector) Run(stopCh <-chan struct{}) {
 	glog.V(3).Infof("Starting reflector %v (%s) from %s", r.expectedType, r.resyncPeriod, r.name)
 	wait.Until(func() {
@@ -236,6 +243,7 @@ func (r *Reflector) resyncChan() (<-chan time.Time, func() bool) {
 // ListAndWatch first lists all items and get the resource version at the moment of call,
 // and then use the resource version to watch.
 // It returns error if ListAndWatch didn't even try to initialize watch.
+// reflector实现数据监视的核心逻辑，在controller.run中启动的。
 func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
 	glog.V(3).Infof("Listing and watching %v from %s", r.expectedType, r.name)
 	var resourceVersion string
@@ -246,6 +254,7 @@ func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
 	options := metav1.ListOptions{ResourceVersion: "0"}
 	r.metrics.numberOfLists.Inc()
 	start := r.clock.Now()
+	// 首先获取全量数据
 	list, err := r.listerWatcher.List(options)
 	if err != nil {
 		return fmt.Errorf("%s: Failed to list %v: %v", r.name, r.expectedType, err)
@@ -256,11 +265,13 @@ func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
 		return fmt.Errorf("%s: Unable to understand list result %#v: %v", r.name, list, err)
 	}
 	resourceVersion = listMetaInterface.GetResourceVersion()
+	// 将全量数据解析为方便后续步骤逻辑的数据
 	items, err := meta.ExtractList(list)
 	if err != nil {
 		return fmt.Errorf("%s: Unable to understand list result %#v (%v)", r.name, list, err)
 	}
 	r.metrics.numberOfItemsInList.Observe(float64(len(items)))
+	// 调用deltaFifo的replace，将全量数据写入deltaFIFO中
 	if err := r.syncWith(items, resourceVersion); err != nil {
 		return fmt.Errorf("%s: Unable to sync list result: %v", r.name, err)
 	}
@@ -294,6 +305,7 @@ func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
 		}
 	}()
 
+	//前面是reflector启动时的全量数据同步（list），下面是watch的部分
 	for {
 		// give the stopCh a chance to stop the loop, even in case of continue statements further down on errors
 		select {
@@ -335,7 +347,7 @@ func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
 			}
 			return nil
 		}
-
+		//调用wathcHandler对watch到的数据进行相关操作。
 		if err := r.watchHandler(w, &resourceVersion, resyncerrc, stopCh); err != nil {
 			if err != errorStopRequested {
 				glog.Warningf("%s: watch of %v ended with: %v", r.name, r.expectedType, err)
@@ -355,6 +367,7 @@ func (r *Reflector) syncWith(items []runtime.Object, resourceVersion string) err
 }
 
 // watchHandler watches w and keeps *resourceVersion up to date.
+// reflector的watch逻辑的实现
 func (r *Reflector) watchHandler(w watch.Interface, resourceVersion *string, errc chan error, stopCh <-chan struct{}) error {
 	start := r.clock.Now()
 	eventCount := 0
@@ -375,6 +388,7 @@ loop:
 			return errorStopRequested
 		case err := <-errc:
 			return err
+			//如果有事件进来
 		case event, ok := <-w.ResultChan():
 			if !ok {
 				break loop
@@ -393,16 +407,19 @@ loop:
 			}
 			newResourceVersion := meta.GetResourceVersion()
 			switch event.Type {
+			//调用deltafifo的add接口添加 add action的delta
 			case watch.Added:
 				err := r.store.Add(event.Object)
 				if err != nil {
 					utilruntime.HandleError(fmt.Errorf("%s: unable to add watch event object (%#v) to store: %v", r.name, event.Object, err))
 				}
+				//调用deltafifo的update接口添加 update action的delta
 			case watch.Modified:
 				err := r.store.Update(event.Object)
 				if err != nil {
 					utilruntime.HandleError(fmt.Errorf("%s: unable to update watch event object (%#v) to store: %v", r.name, event.Object, err))
 				}
+				////调用deltafifo的delete接口添加 delete action的delta
 			case watch.Deleted:
 				// TODO: Will any consumers need access to the "last known
 				// state", which is passed in event.Object? If so, may need
