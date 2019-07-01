@@ -370,7 +370,7 @@ func findNodesThatFit(
 			}
 		}
 
-		//起16个goroutine， 来并发的去判断len(nodes)是否符合该Pod的调度条件
+		//起16个goroutine， 来并发的去判断len(nodes)个node节点是否符合该Pod的调度条件， 满足条件的node放在filtered中
 		workqueue.Parallelize(16, len(nodes), checkNode)
 		filtered = filtered[:filteredLen]
 		if len(errs) > 0 {
@@ -413,6 +413,7 @@ func addNominatedPods(podPriority int32, meta algorithm.PredicateMetadata,
 		// This may happen only in tests.
 		return false, meta, nodeInfo
 	}
+	// 获取该Node中被调度的Pod
 	nominatedPods := queue.WaitingPodsForNode(nodeInfo.Node().Name)
 	if nominatedPods == nil || len(nominatedPods) == 0 {
 		return false, meta, nodeInfo
@@ -482,7 +483,7 @@ func podFitsOnNode(
 		metaToUse := meta
 		nodeInfoToUse := info
 
-		//第一次循环时，从schedulerQueue中找出是否含有比该调度Pod优先级更高 或者 平级的Pod， 如果有则将其加入至nodeInfoToUse中，然后继续下面的逻辑
+		//第一次循环时，从schedulerQueue中找出指定node上是否含有比该调度Pod优先级更高 或者 平级的待调度Pod， 如果有则将其加入至nodeInfoToUse中，然后继续下面的逻辑
 		//第二次循环时，如果第一次循环并没有增加更高级别的Pod,或者第一次循环时出现了预选错误（len(failedPredicated) !+ 0）,则直接结束本次循环
 		if i == 0 {
 			podsAdded, metaToUse, nodeInfoToUse = addNominatedPods(util.GetPodPriority(pod), meta, info, queue)
@@ -1088,6 +1089,7 @@ func podEligibleToPreemptOthers(pod *v1.Pod, nodeNameToInfo map[string]*schedule
 }
 
 // podPassesBasicChecks makes sanity checks on the pod if it can be scheduled.
+// 判断该Pod所设定的PVC是否都存在且没有被删除(DeletionTimestamp == nil),如果不满足，则放弃调度
 func podPassesBasicChecks(pod *v1.Pod, pvcLister corelisters.PersistentVolumeClaimLister) error {
 	// Check PVCs used by the pod
 	namespace := pod.Namespace
