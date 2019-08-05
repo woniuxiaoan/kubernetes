@@ -255,6 +255,10 @@ type Dependencies struct {
 
 // makePodSourceConfig creates a config.PodConfig from the given
 // KubeletConfiguration or returns an error.
+// 配置Kubelet监控Pod的来源:
+//   1. 指定的文件夹(静态Pod)
+//   2. 指定Url(静态Pod)
+//   3. List & Watch Api-Server
 func makePodSourceConfig(kubeCfg *kubeletconfiginternal.KubeletConfiguration, kubeDeps *Dependencies, nodeName types.NodeName, bootstrapCheckpointPath string) (*config.PodConfig, error) {
 	manifestURLHeader := make(http.Header)
 	if len(kubeCfg.StaticPodURLHeader) > 0 {
@@ -584,6 +588,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	}
 
 	// TODO: These need to become arguments to a standalone docker shim.
+	// 通过kubelet启动时设定的参数初始化network plugin
 	pluginSettings := dockershim.NetworkPluginSettings{
 		HairpinMode:       hairpinMode,
 		NonMasqueradeCIDR: nonMasqueradeCIDR,
@@ -634,6 +639,8 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 				remoteRuntimeEndpoint,
 				remoteImageEndpoint)
 			glog.V(2).Infof("Starting the GRPC server for the docker CRI shim.")
+
+			//如果runtime为docker，则起一个dockershim grpc server(cni的实现)
 			server := dockerremote.NewDockerServer(remoteRuntimeEndpoint, ds)
 			if err := server.Start(); err != nil {
 				return nil, err
@@ -654,6 +661,8 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		default:
 			return nil, fmt.Errorf("unsupported CRI runtime: %q", containerRuntime)
 		}
+
+		//创建到dockershim两个conn, 分别和dockershim的 RuntimeService和ImageService相连。
 		runtimeService, imageService, err := getRuntimeAndImageServices(remoteRuntimeEndpoint, remoteImageEndpoint, kubeCfg.RuntimeRequestTimeout)
 		if err != nil {
 			return nil, err

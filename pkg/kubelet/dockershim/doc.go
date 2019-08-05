@@ -16,3 +16,6 @@ limitations under the License.
 
 // Docker integration using pkg/kubelet/apis/cri/runtime/v1alpha2/api.pb.go
 package dockershim
+
+// dockershim为gGpc server， 实现了CRI接口，即实现了CRI要求实现的各个接口
+// kubelet作为gGpc client调用dockershim的指定方法对container进行管理
