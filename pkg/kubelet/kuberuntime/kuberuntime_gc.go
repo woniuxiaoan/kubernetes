@@ -203,6 +203,11 @@ func (cgc *containerGC) evictableContainers(minAge time.Duration) (containersByE
 // evict all containers that are evictable
 func (cgc *containerGC) evictContainers(gcPolicy kubecontainer.ContainerGCPolicy, allSourcesReady bool, evictTerminatedPods bool) error {
 	// Separate containers by evict units.
+	// 获取本轮GC可以进行操作的容器, 容器条件满足: not running && createAt >= MinAge ago
+	// 有一个概念需要提前了解：
+	//   1. 一个Pod可以包含多个Container
+	//   2. 一个name的Container有些时候可能包含多个实例, 比如nginx container在频繁重启，那么在node节点上nginx名字对应的
+	//      container就可能有多个
 	evictUnits, err := cgc.evictableContainers(gcPolicy.MinAge)
 	if err != nil {
 		return err
@@ -219,6 +224,8 @@ func (cgc *containerGC) evictContainers(gcPolicy kubecontainer.ContainerGCPolicy
 	}
 
 	// Enforce max containers per evict unit.
+	// 对每个要操作的evitUint container数量进行整理，删除到里面的container只剩MaxPerPodContainer
+	// 删除操作是调用containerd(http server)的指定接口进行的。
 	if gcPolicy.MaxPerPodContainer >= 0 {
 		cgc.enforceMaxContainersPerEvictUnit(evictUnits, gcPolicy.MaxPerPodContainer)
 	}
@@ -260,6 +267,7 @@ func (cgc *containerGC) evictSandboxes(evictTerminatedPods bool) error {
 	}
 
 	// collect all the PodSandboxId of container
+	// 拿到现有的所有container所对应的sandbox列表
 	sandboxIDs := sets.NewString()
 	for _, container := range containers {
 		sandboxIDs.Insert(container.PodSandboxId)
@@ -272,6 +280,9 @@ func (cgc *containerGC) evictSandboxes(evictTerminatedPods bool) error {
 
 	sandboxesByPod := make(sandboxesByPodUID)
 	for _, sandbox := range sandboxes {
+		// 通过annotation，container被k8分为了两种类型, container 和 sandbox
+		// 每个container都有标识自己所属Pod信息的annotation, 包括(podName,podNamespace, podUID)
+		// container 类型 container中包含有自己sandbox的id
 		podUID := types.UID(sandbox.Metadata.Uid)
 		sandboxInfo := sandboxGCInfo{
 			id:         sandbox.Id,
@@ -284,6 +295,7 @@ func (cgc *containerGC) evictSandboxes(evictTerminatedPods bool) error {
 		}
 
 		// Set sandboxes that still have containers to be active.
+		// 说明该sandbox 还有container
 		if sandboxIDs.Has(sandbox.Id) {
 			sandboxInfo.active = true
 		}
