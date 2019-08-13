@@ -176,6 +176,7 @@ type ClientConfig struct {
 func NewDockerClientFromConfig(config *ClientConfig) libdocker.Interface {
 	if config != nil {
 		// Create docker client.
+		// 创建到containerd http server的client
 		client := libdocker.ConnectToDockerOrDie(
 			config.DockerEndpoint,
 			config.RuntimeRequestTimeout,
@@ -193,6 +194,7 @@ func NewDockerClientFromConfig(config *ClientConfig) libdocker.Interface {
 func NewDockerService(config *ClientConfig, podSandboxImage string, streamingConfig *streaming.Config,
 	pluginSettings *NetworkPluginSettings, cgroupsName string, kubeCgroupDriver string, dockershimRootDir string, disableSharedPID bool) (DockerService, error) {
 
+	// 创建到containerd (http server)的连接，即client
 	client := NewDockerClientFromConfig(config)
 
 	c := libdocker.NewInstrumentedInterface(client)
@@ -229,6 +231,7 @@ func NewDockerService(config *ClientConfig, podSandboxImage string, streamingCon
 		}
 	}
 	// dockershim currently only supports CNI plugins.
+	// 从事先设定的PluginConfDir(/etc/cni/net.d) 与 PluginBinDir(/opt/cni/bin)中拿到各种插件
 	cniPlugins := cni.ProbeNetworkPlugins(pluginSettings.PluginConfDir, pluginSettings.PluginBinDir)
 	cniPlugins = append(cniPlugins, kubenet.NewPlugin(pluginSettings.PluginBinDir))
 	netHost := &dockerNetworkHost{
@@ -236,6 +239,9 @@ func NewDockerService(config *ClientConfig, podSandboxImage string, streamingCon
 		&namespaceGetter{ds},
 		&portMappingGetter{ds},
 	}
+
+	// 按照插件名称初始化该网络插件
+	// 按照事先设定的PluginName挑选合适的plugin初始化容器网络
 	plug, err := network.InitNetworkPlugin(cniPlugins, pluginSettings.PluginName, netHost, pluginSettings.HairpinMode, pluginSettings.NonMasqueradeCIDR, pluginSettings.MTU)
 	if err != nil {
 		return nil, fmt.Errorf("didn't find compatible CNI plugin with given settings %+v: %v", pluginSettings, err)

@@ -324,7 +324,7 @@ func getRuntimeAndImageServices(remoteRuntimeEndpoint string, remoteImageEndpoin
 // No initialization of Kubelet and its modules should happen here.
 func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	kubeDeps *Dependencies,
-	crOptions *config.ContainerRuntimeOptions,
+	crOptions *config.ContainerRuntimeOptions, //设定了默认容器命名，默认的SandboxImage，默认的dockerEndPoint
 	containerRuntime string,
 	runtimeCgroups string,
 	hostnameOverride string,
@@ -336,8 +336,8 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	registerNode bool,
 	registerWithTaints []api.Taint,
 	allowedUnsafeSysctls []string,
-	remoteRuntimeEndpoint string,
-	remoteImageEndpoint string,
+	remoteRuntimeEndpoint string, //CRI grpc server端地址, 默认: unix:///var/run/dockershim.sock
+	remoteImageEndpoint string,   //CRI grpc server端地址, 默认: unix:///var/run/dockershim.sock
 	experimentalMounterPath string,
 	experimentalKernelMemcgNotification bool,
 	experimentalCheckNodeCapabilitiesBeforeMount bool,
@@ -624,6 +624,8 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		case kubetypes.DockerContainerRuntime:
 			// Create and start the CRI shim running as a grpc server.
 			streamingConfig := getStreamingConfig(kubeCfg, kubeDeps)
+
+			//初始化dockershim grpc server
 			ds, err := dockershim.NewDockerService(kubeDeps.DockerClientConfig, crOptions.PodSandboxImage, streamingConfig,
 				&pluginSettings, runtimeCgroups, kubeCfg.CgroupDriver, crOptions.DockershimRootDirectory,
 				crOptions.DockerDisableSharedPID)
@@ -642,6 +644,8 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 
 			//如果runtime为docker，则起一个dockershim grpc server(cni的实现)
 			server := dockerremote.NewDockerServer(remoteRuntimeEndpoint, ds)
+
+			//启动dockershim grpc server
 			if err := server.Start(); err != nil {
 				return nil, err
 			}
@@ -668,6 +672,8 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 			return nil, err
 		}
 		klet.runtimeService = runtimeService
+		//后续对Pod的处理都是利用的这个对象
+		//对监听到的变动Pod进行处理的逻辑为该对象的.SyncPod method
 		runtime, err := kuberuntime.NewKubeGenericRuntimeManager(
 			kubecontainer.FilterEventRecorder(kubeDeps.Recorder),
 			klet.livenessManager,
@@ -860,6 +866,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	klet.runtimeCache = runtimeCache
 	klet.reasonCache = NewReasonCache()
 	klet.workQueue = queue.NewBasicWorkQueue(klet.clock)
+	//设定pod的handler, 即用来处理新Pod的函数
 	klet.podWorkers = newPodWorkers(klet.syncPod, kubeDeps.Recorder, klet.workQueue, klet.resyncInterval, backOffPeriod, klet.podCache)
 
 	klet.backOff = flowcontrol.NewBackOff(backOffPeriod, MaxContainerBackOff)
@@ -1655,6 +1662,9 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 	pullSecrets := kl.getPullSecretsForPod(pod)
 
 	// Call the container runtime's SyncPod callback
+	// 对监听到的变动Pod进行实际操作
+	// pullSecrets: 拉取镜像用的 secret
+	// pod: 监听到的变动Pod对象
 	result := kl.containerRuntime.SyncPod(pod, apiPodStatus, podStatus, pullSecrets, kl.backOff)
 	kl.reasonCache.Update(pod.UID, result)
 	if err := result.Error(); err != nil {

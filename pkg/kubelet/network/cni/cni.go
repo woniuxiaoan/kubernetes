@@ -84,10 +84,12 @@ func probeNetworkPluginsWithVendorCNIDirPrefix(pluginDir, binDir, vendorCNIDirPr
 	}
 
 	// sync NetworkConfig in best effort during probing.
+	// 设置默认网络,即插件plugins的第一个
 	plugin.syncNetworkConfig()
 	return []network.NetworkPlugin{plugin}
 }
 
+//pulginDir = /etc/cni/net.d, binDir = /opt/cni/bin
 func ProbeNetworkPlugins(pluginDir, binDir string) []network.NetworkPlugin {
 	return probeNetworkPluginsWithVendorCNIDirPrefix(pluginDir, binDir, "")
 }
@@ -96,6 +98,8 @@ func getDefaultCNINetwork(pluginDir, binDir, vendorCNIDirPrefix string) (*cniNet
 	if pluginDir == "" {
 		pluginDir = DefaultNetDir
 	}
+
+	//查找 conf  conflist  json 三种格式的文件
 	files, err := libcni.ConfFiles(pluginDir, []string{".conf", ".conflist", ".json"})
 	switch {
 	case err != nil:
@@ -132,6 +136,8 @@ func getDefaultCNINetwork(pluginDir, binDir, vendorCNIDirPrefix string) (*cniNet
 				continue
 			}
 		}
+
+		//最终取哪个plugin是不为空的配置文件
 		if len(confList.Plugins) == 0 {
 			glog.Warningf("CNI config list %s has no networks, skipping", confFile)
 			continue
@@ -215,6 +221,7 @@ func (plugin *cniNetworkPlugin) SetUpPod(namespace string, name string, id kubec
 	}
 
 	// Windows doesn't have loNetwork. It comes only with Linux
+	// 设定Sandbox本地网络
 	if plugin.loNetwork != nil {
 		if _, err = plugin.addToNetwork(plugin.loNetwork, name, namespace, id, netnsPath); err != nil {
 			glog.Errorf("Error while adding to cni lo network: %s", err)
@@ -222,6 +229,7 @@ func (plugin *cniNetworkPlugin) SetUpPod(namespace string, name string, id kubec
 		}
 	}
 
+	//按照插件顺序依次执行各个插件的ADD命令
 	_, err = plugin.addToNetwork(plugin.getDefaultNetwork(), name, namespace, id, netnsPath)
 	if err != nil {
 		glog.Errorf("Error while adding to cni network: %s", err)

@@ -76,6 +76,7 @@ func (ds *dockerService) clearNetworkReady(podSandboxID string) {
 // For docker, PodSandbox is implemented by a container holding the network
 // namespace for the pod.
 // Note: docker doesn't use LogDirectory (yet).
+// kubelet就是通过grpc 远程调用该method 创建了pause容器
 func (ds *dockerService) RunPodSandbox(ctx context.Context, r *runtimeapi.RunPodSandboxRequest) (*runtimeapi.RunPodSandboxResponse, error) {
 	config := r.GetConfig()
 
@@ -98,6 +99,9 @@ func (ds *dockerService) RunPodSandbox(ctx context.Context, r *runtimeapi.RunPod
 	if err != nil {
 		return nil, fmt.Errorf("failed to make sandbox docker config for pod %q: %v", config.Metadata.Name, err)
 	}
+
+	//调用containerd (http server)提供的接口创建一个container
+	//containerd url: /containers/create [POST]
 	createResp, err := ds.client.CreateContainer(*createConfig)
 	if err != nil {
 		createResp, err = recoverFromCreationConflictIfNeeded(ds.client, *createConfig, err)
@@ -125,6 +129,7 @@ func (ds *dockerService) RunPodSandbox(ctx context.Context, r *runtimeapi.RunPod
 	// Step 4: Start the sandbox container.
 	// Assume kubelet's garbage collector would remove the sandbox later, if
 	// startContainer failed.
+	//调用containerd (http server)提供的接口启动sandbox容器，即pause容器
 	err = ds.client.StartContainer(createResp.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start sandbox container for pod %q: %v", config.Metadata.Name, err)
@@ -160,6 +165,8 @@ func (ds *dockerService) RunPodSandbox(ctx context.Context, r *runtimeapi.RunPod
 	// on the host as well, to satisfy parts of the pod spec that aren't
 	// recognized by the CNI standard yet.
 	cID := kubecontainer.BuildContainerID(runtimeName, createResp.ID)
+
+
 	err = ds.network.SetUpPod(config.GetMetadata().Namespace, config.GetMetadata().Name, cID, config.Annotations)
 	if err != nil {
 		// TODO(random-liu): Do we need to teardown network here?

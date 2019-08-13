@@ -56,12 +56,40 @@ func ConfFromFile(filename string) (*NetworkConfig, error) {
 	return ConfFromBytes(bytes)
 }
 
+// bytes内容是/etc/cni/net.d里面的配置文件，大体格式为
+/*
+{
+	"name": "k8s-pod-network",
+	"cniVersion": "0.3.0",
+	"plugins": [
+		{
+			"type": "calico",
+			"log_level": "info",
+			"nodename": "10.2.0.8"
+			"ipam": {
+				"type": "host-local",
+				"subnet": "usePodCidr"
+			},
+			"policy": xxx
+			"kubernetes": xxx
+		},
+		{
+			"type": "portmap",
+			"snat": true,
+			"capabilities": {
+				"portMappings": true
+			}
+		}
+	]
+}
+ */
 func ConfListFromBytes(bytes []byte) (*NetworkConfigList, error) {
 	rawList := make(map[string]interface{})
 	if err := json.Unmarshal(bytes, &rawList); err != nil {
 		return nil, fmt.Errorf("error parsing configuration list: %s", err)
 	}
 
+	// 配置文件没有名称，报错
 	rawName, ok := rawList["name"]
 	if !ok {
 		return nil, fmt.Errorf("error parsing configuration list: no name")
@@ -87,14 +115,20 @@ func ConfListFromBytes(bytes []byte) (*NetworkConfigList, error) {
 	}
 
 	var plugins []interface{}
+
+	// 获取配置文件中的 plugins 字段内容， 没有则报错
 	plug, ok := rawList["plugins"]
 	if !ok {
 		return nil, fmt.Errorf("error parsing configuration list: no 'plugins' key")
 	}
+
+	// 格式非数组，报错
 	plugins, ok = plug.([]interface{})
 	if !ok {
 		return nil, fmt.Errorf("error parsing configuration list: invalid 'plugins' type %T", plug)
 	}
+
+	// 空数组，报错
 	if len(plugins) == 0 {
 		return nil, fmt.Errorf("error parsing configuration list: no plugins in list")
 	}
@@ -104,6 +138,8 @@ func ConfListFromBytes(bytes []byte) (*NetworkConfigList, error) {
 		if err != nil {
 			return nil, fmt.Errorf("Failed to marshal plugin config %d: %v", i, err)
 		}
+
+		//获取每个plugin对应的对象
 		netConf, err := ConfFromBytes(newBytes)
 		if err != nil {
 			return nil, fmt.Errorf("Failed to parse plugin config %d: %v", i, err)

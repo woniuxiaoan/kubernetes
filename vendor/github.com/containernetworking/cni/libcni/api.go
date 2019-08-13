@@ -122,6 +122,7 @@ func injectRuntimeConfig(orig *NetworkConfig, rt *RuntimeConf) (*NetworkConfig, 
 // AddNetworkList executes a sequence of plugins with the ADD command
 func (c *CNIConfig) AddNetworkList(list *NetworkConfigList, rt *RuntimeConf) (types.Result, error) {
 	var prevResult types.Result
+	//按照顺序执行配置文件中每个插件的ADD命令
 	for _, net := range list.Plugins {
 		pluginPath, err := invoke.FindInPath(net.Network.Type, c.Path)
 		if err != nil {
@@ -144,6 +145,7 @@ func (c *CNIConfig) AddNetworkList(list *NetworkConfigList, rt *RuntimeConf) (ty
 
 // DelNetworkList executes a sequence of plugins with the DEL command
 func (c *CNIConfig) DelNetworkList(list *NetworkConfigList, rt *RuntimeConf) error {
+	//按照顺序执行配置文件中每个插件的DEL命令
 	for i := len(list.Plugins) - 1; i >= 0; i-- {
 		net := list.Plugins[i]
 
@@ -166,6 +168,7 @@ func (c *CNIConfig) DelNetworkList(list *NetworkConfigList, rt *RuntimeConf) err
 }
 
 // AddNetwork executes the plugin with the ADD command
+// 执行所找到插件的ADD命令
 func (c *CNIConfig) AddNetwork(net *NetworkConfig, rt *RuntimeConf) (types.Result, error) {
 	pluginPath, err := invoke.FindInPath(net.Network.Type, c.Path)
 	if err != nil {
