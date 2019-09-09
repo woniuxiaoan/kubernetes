@@ -418,10 +418,11 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		}
 	}
 
+	//设定容器的垃圾回收(GC)策略
 	containerGCPolicy := kubecontainer.ContainerGCPolicy{
 		MinAge:             minimumGCAge.Duration,
-		MaxPerPodContainer: int(maxPerPodContainerCount),
-		MaxContainers:      int(maxContainerCount),
+		MaxPerPodContainer: int(maxPerPodContainerCount), //每个容器所能拥有的最多dead container个数
+		MaxContainers:      int(maxContainerCount), //该节点最多的dead container个数
 	}
 
 	daemonEndpoints := &v1.NodeDaemonEndpoints{

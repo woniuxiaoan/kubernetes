@@ -160,6 +160,7 @@ func (cgc *containerGC) removeSandbox(sandboxID string) {
 
 // evictableContainers gets all containers that are evictable. Evictable containers are: not running
 // and created more than MinAge ago.
+// 找到该节点上状态！= running且创建时间大于MinAge的容器
 func (cgc *containerGC) evictableContainers(minAge time.Duration) (containersByEvictUnit, error) {
 	containers, err := cgc.manager.getKubeletContainers(true)
 	if err != nil {
@@ -226,6 +227,7 @@ func (cgc *containerGC) evictContainers(gcPolicy kubecontainer.ContainerGCPolicy
 	// Enforce max containers per evict unit.
 	// 对每个要操作的evitUint container数量进行整理，删除到里面的container只剩MaxPerPodContainer
 	// 删除操作是调用containerd(http server)的指定接口进行的。
+	// 删除每个evictableContainer中多过MaxPerPodContainer的容器，例如容器nginx在GC时有5个dead容器，而MaxPerPodContainer=1，则删除最早创建的那4个容器。
 	if gcPolicy.MaxPerPodContainer >= 0 {
 		cgc.enforceMaxContainersPerEvictUnit(evictUnits, gcPolicy.MaxPerPodContainer)
 	}
@@ -233,6 +235,7 @@ func (cgc *containerGC) evictContainers(gcPolicy kubecontainer.ContainerGCPolicy
 	// Enforce max total number of containers.
 	if gcPolicy.MaxContainers >= 0 && evictUnits.NumContainers() > gcPolicy.MaxContainers {
 		// Leave an equal number of containers per evict unit (min: 1).
+		// 根据MaxContainer数量，算出每个EvictUnit所能持有的not running状态的容器书数量， 超出的evictable container删除
 		numContainersPerEvictUnit := gcPolicy.MaxContainers / evictUnits.NumEvictUnits()
 		if numContainersPerEvictUnit < 1 {
 			numContainersPerEvictUnit = 1
@@ -240,6 +243,7 @@ func (cgc *containerGC) evictContainers(gcPolicy kubecontainer.ContainerGCPolicy
 		cgc.enforceMaxContainersPerEvictUnit(evictUnits, numContainersPerEvictUnit)
 
 		// If we still need to evict, evict oldest first.
+		// 如果总evictable 以旧 > MaxContainers, 则排序剩下所有的evictable container，按照时创建时间， 删除最早创建的(numContainers-MaxContainers)个容器
 		numContainers := evictUnits.NumContainers()
 		if numContainers > gcPolicy.MaxContainers {
 			flattened := make([]containerGCInfo, 0, numContainers)
@@ -260,6 +264,7 @@ func (cgc *containerGC) evictContainers(gcPolicy kubecontainer.ContainerGCPolicy
 //   2. contains no containers.
 //   3. belong to a non-existent (i.e., already removed) pod, or is not the
 //      most recently created sandbox for the pod.
+// 从上面可以看到这里Sandbox和Container是不同的，Container指的是真正的加入Sandbox namespace的容器
 func (cgc *containerGC) evictSandboxes(evictTerminatedPods bool) error {
 	containers, err := cgc.manager.getKubeletContainers(true)
 	if err != nil {
@@ -282,7 +287,7 @@ func (cgc *containerGC) evictSandboxes(evictTerminatedPods bool) error {
 	for _, sandbox := range sandboxes {
 		// 通过annotation，container被k8分为了两种类型, container 和 sandbox
 		// 每个container都有标识自己所属Pod信息的annotation, 包括(podName,podNamespace, podUID)
-		// container 类型 container中包含有自己sandbox的id
+		// container类型container中包含有自己sandbox的id
 		podUID := types.UID(sandbox.Metadata.Uid)
 		sandboxInfo := sandboxGCInfo{
 			id:         sandbox.Id,
@@ -295,20 +300,23 @@ func (cgc *containerGC) evictSandboxes(evictTerminatedPods bool) error {
 		}
 
 		// Set sandboxes that still have containers to be active.
-		// 说明该sandbox 还有container
+		// 说明该sandbox 还有container, 则该sandbox还是active的
 		if sandboxIDs.Has(sandbox.Id) {
 			sandboxInfo.active = true
 		}
 
+		// 获取本机所有Sandbox的信息(id,创建时间，状态)
 		sandboxesByPod[podUID] = append(sandboxesByPod[podUID], sandboxInfo)
 	}
 
 	// Sort the sandboxes by age.
+	// 按照创建时间，排序本机所有的sandbox
 	for uid := range sandboxesByPod {
 		sort.Sort(sandboxByCreated(sandboxesByPod[uid]))
 	}
 
 	for podUID, sandboxes := range sandboxesByPod {
+		//如果某个Pod状态满足如下条件，则删除该Pod中所有状态非active的sandboxs
 		if cgc.podStateProvider.IsPodDeleted(podUID) || (cgc.podStateProvider.IsPodTerminated(podUID) && evictTerminatedPods) {
 			// Remove all evictable sandboxes if the pod has been removed.
 			// Note that the latest dead sandbox is also removed if there is
@@ -316,6 +324,7 @@ func (cgc *containerGC) evictSandboxes(evictTerminatedPods bool) error {
 			cgc.removeOldestNSandboxes(sandboxes, len(sandboxes))
 		} else {
 			// Keep latest one if the pod still exists.
+			// 删除该Pod中最早创建的len(sandboxes)-1个sandbox中所有状态非active的sandbox
 			cgc.removeOldestNSandboxes(sandboxes, len(sandboxes)-1)
 		}
 	}
@@ -347,6 +356,7 @@ func (cgc *containerGC) evictPodLogsDirectories(allSourcesReady bool) error {
 
 	// Remove dead container log symlinks.
 	// TODO(random-liu): Remove this after cluster logging supports CRI container log path.
+	// /var/log/containers/*.log
 	logSymlinks, _ := osInterface.Glob(filepath.Join(legacyContainerLogsDir, fmt.Sprintf("*.%s", legacyLogSuffix)))
 	for _, logSymlink := range logSymlinks {
 		if _, err := osInterface.Stat(logSymlink); os.IsNotExist(err) {
