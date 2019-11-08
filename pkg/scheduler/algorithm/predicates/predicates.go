@@ -711,6 +711,9 @@ func PodFitsResources(pod *v1.Pod, meta algorithm.PredicateMetadata, nodeInfo *s
 
 	var predicateFails []algorithm.PredicateFailureReason
 	allowedPodNumber := nodeInfo.AllowedPodNumber()
+
+	//每个node节点都有一个pod上线，看是否超过这个上限
+	//TODO(woniu) nodeInfo.Pods() 具体含义是什么? 包含虽然被分配到该节点但是还没有执行调度的Pod吗?
 	if len(nodeInfo.Pods())+1 > allowedPodNumber {
 		predicateFails = append(predicateFails, NewInsufficientResourceError(v1.ResourcePods, 1, int64(len(nodeInfo.Pods())), int64(allowedPodNumber)))
 	}
@@ -736,7 +739,12 @@ func PodFitsResources(pod *v1.Pod, meta algorithm.PredicateMetadata, nodeInfo *s
 		return len(predicateFails) == 0, predicateFails, nil
 	}
 
+	//该节点可以分配的资源
+	//注意allocatable, 指的是可以分配的总资源， 而不是减去已经分配的资源
 	allocatable := nodeInfo.AllocatableResource()
+
+	//TODO(woniu) nodeInfo.RequestedResource() ?
+	//注意是request
 	if allocatable.MilliCPU < podRequest.MilliCPU+nodeInfo.RequestedResource().MilliCPU {
 		predicateFails = append(predicateFails, NewInsufficientResourceError(v1.ResourceCPU, podRequest.MilliCPU, nodeInfo.RequestedResource().MilliCPU, allocatable.MilliCPU))
 	}
@@ -838,6 +846,7 @@ func podMatchesNodeLabels(pod *v1.Pod, node *v1.Node) bool {
 }
 
 // PodMatchNodeSelector checks if a pod node selector matches the node label.
+// node label是否满足 pod.spec.nodeSelector
 func PodMatchNodeSelector(pod *v1.Pod, meta algorithm.PredicateMetadata, nodeInfo *schedulercache.NodeInfo) (bool, []algorithm.PredicateFailureReason, error) {
 	node := nodeInfo.Node()
 	if node == nil {
@@ -850,6 +859,7 @@ func PodMatchNodeSelector(pod *v1.Pod, meta algorithm.PredicateMetadata, nodeInf
 }
 
 // PodFitsHost checks if a pod spec node name matches the current node.
+// nodeName 是否等于 pod.spec.nodeName
 func PodFitsHost(pod *v1.Pod, meta algorithm.PredicateMetadata, nodeInfo *schedulercache.NodeInfo) (bool, []algorithm.PredicateFailureReason, error) {
 	if len(pod.Spec.NodeName) == 0 {
 		return true, nil, nil

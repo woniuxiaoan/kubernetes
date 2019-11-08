@@ -451,6 +451,7 @@ func (p *PriorityQueue) getUnschedulablePodsWithMatchingAffinityTerm(pod *v1.Pod
 // WaitingPodsForNode returns pods that are nominated to run on the given node,
 // but they are waiting for other pods to be removed from the node before they
 // can be actually scheduled.
+// 获取PriorityQueue中已经提名某个nodeName的所有Pod
 func (p *PriorityQueue) WaitingPodsForNode(nodeName string) []*v1.Pod {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
