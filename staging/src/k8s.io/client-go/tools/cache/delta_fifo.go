@@ -265,7 +265,7 @@ func (f *DeltaFIFO) addIfNotPresent(id string, deltas Deltas) {
 // re-listing and watching can deliver the same update multiple times in any
 // order. This will combine the most recent two deltas if they are the same.
 //DeltaFIFO生产者和消费者是异步的，如果一个目标的频繁操作，前面操作还缓存在队列中的时候，后面的操作已经又
-//进入到了队列中，此时就需要相关合并操作。更新操作是没有办法合并的（why??），能合并的只有多次删除 或者 多次
+//进入到了队列中，此时就需要相关合并操作。更新操作在没有全量基础的情况下是没有办法合并的，能合并的只有多次删除 或者 多次
 //添加同一个对象，因为多次添加同一个对象apiserver会确保唯一性，所以这里就不需要去重了。此时就剩了多次删除
 //需要去重。
 func dedupDeltas(deltas Deltas) Deltas {
@@ -286,7 +286,10 @@ func dedupDeltas(deltas Deltas) Deltas {
 // If a & b represent the same event, returns the delta that ought to be kept.
 // Otherwise, returns nil.
 // TODO: is there anything other than deletions that need deduping?
+// 判断两个Delta是否是重复的
 func isDup(a, b *Delta) *Delta {
+	// 只有一个判断, 判断是否为删除操作
+	// 这个函数的本意应该还可以判断多重类型的重复，当前看起来只能有删除这一种能够合并
 	if out := isDeletionDup(a, b); out != nil {
 		return out
 	}
@@ -330,6 +333,7 @@ func (f *DeltaFIFO) queueActionLocked(actionType DeltaType, obj interface{}) err
 	}
 
 	newDeltas := append(f.items[id], Delta{actionType, obj})
+	// 去掉重复的Delta数据
 	newDeltas = dedupDeltas(newDeltas)
 
 	_, exists := f.items[id]
@@ -477,6 +481,7 @@ func (f *DeltaFIFO) Pop(process PopProcessFunc) (interface{}, error) {
 // after calling this function. f's queue is reset, too; upon return, it
 // will contain the items in the map, in no particular order.
 // 只有Replace函数能触发initialPopulationCount ++
+// Replace拉到的是全量数据, 也就是list是全量数据, 比如全量的Pods等等。
 func (f *DeltaFIFO) Replace(list []interface{}, resourceVersion string) error {
 	f.lock.Lock()
 	defer f.lock.Unlock()

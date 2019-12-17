@@ -107,7 +107,7 @@ func (c *controller) Run(stopCh <-chan struct{}) {
 	r := NewReflector(
 		c.config.ListerWatcher,
 		c.config.ObjectType,
-		c.config.Queue,
+		c.config.Queue, //这个就是deltaFIFO队列
 		c.config.FullResyncPeriod,
 	)
 	r.ShouldResync = c.config.ShouldResync

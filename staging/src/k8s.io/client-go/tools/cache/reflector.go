@@ -204,9 +204,10 @@ func extractStackCreator() (string, int, bool) {
 
 // Run starts a watch and handles watch events. Will restart the watch if it is closed.
 // Run will exit when stopCh is closed.
-// 启动reflector，然后reflector就会监听api-server的变化，将数据持续写入deltafifo中
+// 启动reflector，然后reflector就会监听api-server的变化，将数据持续写入deltaFIFO中
 func (r *Reflector) Run(stopCh <-chan struct{}) {
 	glog.V(3).Infof("Starting reflector %v (%s) from %s", r.expectedType, r.resyncPeriod, r.name)
+	//每隔r.period reflector执行一次ListAndWatch
 	wait.Until(func() {
 		if err := r.ListAndWatch(stopCh); err != nil {
 			utilruntime.HandleError(err)

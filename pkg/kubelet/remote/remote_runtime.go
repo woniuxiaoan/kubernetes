@@ -86,7 +86,7 @@ func (r *RemoteRuntimeService) RunPodSandbox(config *runtimeapi.PodSandboxConfig
 	defer cancel()
 
 	//此处runtimeClient就是事先和dockershim(grpc server)创建的connection
-	//RunPodSandbox就是cni规定的一个方法之一
+	//RunPodSandbox就是cri规定的一个方法之一
 	//在这个方法中, 又调用了cni，初始化了该Sandbox的网络
 	resp, err := r.runtimeClient.RunPodSandbox(ctx, &runtimeapi.RunPodSandboxRequest{
 		Config: config,
