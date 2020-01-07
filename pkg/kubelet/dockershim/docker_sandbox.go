@@ -77,6 +77,7 @@ func (ds *dockerService) clearNetworkReady(podSandboxID string) {
 // namespace for the pod.
 // Note: docker doesn't use LogDirectory (yet).
 // kubelet就是通过grpc 远程调用该method 创建了pause容器
+// 参数r里面包含待创建Pod: name, namespace, uid, labels, annotations
 func (ds *dockerService) RunPodSandbox(ctx context.Context, r *runtimeapi.RunPodSandboxRequest) (*runtimeapi.RunPodSandboxResponse, error) {
 	config := r.GetConfig()
 
@@ -102,6 +103,7 @@ func (ds *dockerService) RunPodSandbox(ctx context.Context, r *runtimeapi.RunPod
 
 	//调用containerd (http server)提供的接口创建一个container
 	//containerd url: /containers/create [POST]
+	//createConfig里面包含pause容器的配置, 比如镜像
 	createResp, err := ds.client.CreateContainer(*createConfig)
 	if err != nil {
 		createResp, err = recoverFromCreationConflictIfNeeded(ds.client, *createConfig, err)
@@ -164,6 +166,8 @@ func (ds *dockerService) RunPodSandbox(ctx context.Context, r *runtimeapi.RunPod
 	// sandbox networking, but it might insert iptables rules or open ports
 	// on the host as well, to satisfy parts of the pod spec that aren't
 	// recognized by the CNI standard yet.
+	// 拿到pause容器的id,一遍设置该容器的网络。此时pause已经启动,就是说该Pod的network
+	// namespace已经设置好了。
 	cID := kubecontainer.BuildContainerID(runtimeName, createResp.ID)
 
 

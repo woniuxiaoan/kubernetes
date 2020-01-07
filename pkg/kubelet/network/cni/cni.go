@@ -211,10 +211,13 @@ func (plugin *cniNetworkPlugin) Status() error {
 	return plugin.checkInitialized()
 }
 
+// RunPodSandbox会调用该方法, 此时namespace/name/annotations为Pod信息， id为pause容器的containerID
 func (plugin *cniNetworkPlugin) SetUpPod(namespace string, name string, id kubecontainer.ContainerID, annotations map[string]string) error {
 	if err := plugin.checkInitialized(); err != nil {
 		return err
 	}
+
+	// 获取容器所在的network namespace
 	netnsPath, err := plugin.host.GetNetNS(id.ID)
 	if err != nil {
 		return fmt.Errorf("CNI failed to retrieve network namespace path: %v", err)
@@ -229,7 +232,7 @@ func (plugin *cniNetworkPlugin) SetUpPod(namespace string, name string, id kubec
 		}
 	}
 
-	//按照插件顺序依次执行各个插件的ADD命令
+	//按照插件顺序依次执行各个插件的ADD命令,向pause容器所在的network ns中添加各种网络设备。
 	_, err = plugin.addToNetwork(plugin.getDefaultNetwork(), name, namespace, id, netnsPath)
 	if err != nil {
 		glog.Errorf("Error while adding to cni network: %s", err)

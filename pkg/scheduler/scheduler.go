@@ -70,6 +70,8 @@ type Scheduler struct {
 // StopEverything closes the scheduler config's StopEverything channel, to shut
 // down the Scheduler.
 func (sched *Scheduler) StopEverything() {
+	// close channel后, 针对 channel的 读取操作就会理解结束(返回默认零值)
+	// 所以可以利用此特性， 配合 select来完成结束操作
 	close(sched.config.StopEverything)
 }
 

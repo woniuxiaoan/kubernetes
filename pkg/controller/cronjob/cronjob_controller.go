@@ -108,6 +108,7 @@ func (jm *CronJobController) Run(stopCh <-chan struct{}) {
 }
 
 // syncAll lists all the CronJobs and Jobs and reconciles them.
+// 每10s执行一次该函数
 func (jm *CronJobController) syncAll() {
 	// List children (Jobs) before parents (CronJob).
 	// This guarantees that if we see any Job that got orphaned by the GC orphan finalizer,
@@ -205,6 +206,8 @@ func removeOldestJobs(sj *batchv1beta1.CronJob, js []batchv1.Job, jc jobControlI
 // All known jobs created by "sj" should be included in "js".
 // The current time is passed in to facilitate testing.
 // It has no receiver, to facilitate testing.
+// sj为cronJob， js为改cronJob对应的所有Jobs
+// 每10s执行一次该函数，cronJob.scheduler的最小时间段是分钟
 func syncOne(sj *batchv1beta1.CronJob, js []batchv1.Job, now time.Time, jc jobControlInterface, sjc sjControlInterface, pc podControlInterface, recorder record.EventRecorder) {
 	nameForLog := fmt.Sprintf("%s/%s", sj.Namespace, sj.Name)
 
@@ -212,6 +215,7 @@ func syncOne(sj *batchv1beta1.CronJob, js []batchv1.Job, now time.Time, jc jobCo
 	for _, j := range js {
 		childrenJobs[j.ObjectMeta.UID] = true
 		found := inActiveList(*sj, j.ObjectMeta.UID)
+		//如果一个job状态为completed 或者 failed， 那么该job就为finished
 		if !found && !IsJobFinished(&j) {
 			recorder.Eventf(sj, v1.EventTypeWarning, "UnexpectedJob", "Saw a job that the controller did not create or forgot: %v", j.Name)
 			// We found an unfinished job that has us as the parent, but it is not in our Active list.
@@ -224,6 +228,7 @@ func syncOne(sj *batchv1beta1.CronJob, js []batchv1.Job, now time.Time, jc jobCo
 			// user has permission to create a job within a namespace, then they have permission to make any scheduledJob
 			// in the same namespace "adopt" that job.  ReplicaSets and their Pods work the same way.
 			// TBS: how to update sj.Status.LastScheduleTime if the adopted job is newer than any we knew about?
+			// 清除cronJob status中的，状态为finished的job
 		} else if found && IsJobFinished(&j) {
 			deleteFromActiveList(sj, j.ObjectMeta.UID)
 			// TODO: event to call out failure vs success.
