@@ -403,6 +403,9 @@ func (dc *DeploymentController) scale(deployment *extensions.Deployment, newRS *
 		if *(activeOrLatest.Spec.Replicas) == *(deployment.Spec.Replicas) {
 			return nil
 		}
+
+		//只有一个rs,说明本次操作仅为scale操作
+		//调整activeOrLatest rs的replicas为 deployment.Spec.Replicas
 		_, _, err := dc.scaleReplicaSetAndRecordEvent(activeOrLatest, *(deployment.Spec.Replicas), deployment)
 		return err
 	}
@@ -421,6 +424,7 @@ func (dc *DeploymentController) scale(deployment *extensions.Deployment, newRS *
 	// There are old replica sets with pods and the new replica set is not saturated.
 	// We need to proportionally scale all replica sets (new and old) in case of a
 	// rolling deployment.
+	//有一个以上rs，判断是否为滚动更新
 	if deploymentutil.IsRollingUpdate(deployment) {
 		allRSs := controller.FilterActiveReplicaSets(append(oldRSs, newRS))
 		allRSsReplicas := deploymentutil.GetReplicaCountForReplicaSets(allRSs)

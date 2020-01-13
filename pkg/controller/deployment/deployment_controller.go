@@ -630,7 +630,8 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 	}
 
 	//如果该deploy的deletionTimestamp非空,表示该deploy被删除,此时只更新该deploy状态即可。
-	//删除deployment会走到此
+	//删除deployment会走到此, 此步骤仅仅是改变了deployment的状态，而没有任何实质性的删除操作
+	//真正的删除操作其实是在garbagecollector controller(垃圾回收器)中完成的
 	if d.DeletionTimestamp != nil {
 		return dc.syncStatusOnly(d, rsList, podMap)
 	}
@@ -667,7 +668,7 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 		return dc.sync(d, rsList, podMap)
 	}
 
-	//别的事件会走到此, 比如创建新的deployment, 镜像修改，Pod参数修改等等
+	//别的事件会走到此, 比如创建新的deployment, 镜像修改，resume deployment、Pod参数修改等等
 	switch d.Spec.Strategy.Type {
 	case extensions.RecreateDeploymentStrategyType:
 		return dc.rolloutRecreate(d, rsList, podMap)
