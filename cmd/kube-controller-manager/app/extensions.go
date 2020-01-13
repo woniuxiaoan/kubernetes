@@ -32,6 +32,8 @@ func startDeploymentController(ctx ControllerContext) (bool, error) {
 	if !ctx.AvailableResources[schema.GroupVersionResource{Group: "extensions", Version: "v1beta1", Resource: "deployments"}] {
 		return false, nil
 	}
+
+	//deployment-controller用到了deployment、rs、pod资源
 	dc, err := deployment.NewDeploymentController(
 		ctx.InformerFactory.Extensions().V1beta1().Deployments(),
 		ctx.InformerFactory.Extensions().V1beta1().ReplicaSets(),

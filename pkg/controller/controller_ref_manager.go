@@ -65,12 +65,16 @@ func (m *BaseControllerRefManager) CanAdopt() error {
 //
 // No reconciliation will be attempted if the controller is being deleted.
 func (m *BaseControllerRefManager) ClaimObject(obj metav1.Object, match func(metav1.Object) bool, adopt, release func(metav1.Object) error) (bool, error) {
+	//获取rs.metadata.controllerRef获取对应Deployment信息
 	controllerRef := metav1.GetControllerOf(obj)
 	if controllerRef != nil {
+		//rs的controller.UID 不等于目标deployment.UID,即该rs是别的deployment的
 		if controllerRef.UID != m.Controller.GetUID() {
 			// Owned by someone else. Ignore.
 			return false, nil
 		}
+
+		//查看obj的labels是否满足deployment.selector
 		if match(obj) {
 			// We already own it and the selector matches.
 			// Return true (successfully claimed) before checking deletion timestamp.
@@ -83,6 +87,9 @@ func (m *BaseControllerRefManager) ClaimObject(obj metav1.Object, match func(met
 		if m.Controller.GetDeletionTimestamp() != nil {
 			return false, nil
 		}
+
+		//rs.controllerRef.UID == deployment.UID && rs.labels !match deployment.selector
+		//此时将rs从deployment中摘除(即修改rs.ownerReferences的deployment uid)
 		if err := release(obj); err != nil {
 			// If the pod no longer exists, ignore the error.
 			if errors.IsNotFound(err) {
@@ -97,6 +104,7 @@ func (m *BaseControllerRefManager) ClaimObject(obj metav1.Object, match func(met
 	}
 
 	// It's an orphan.
+	// 该rs为orphan, 即没有设定controllerRef
 	if m.Controller.GetDeletionTimestamp() != nil || !match(obj) {
 		// Ignore if we're being deleted or selector doesn't match.
 		return false, nil
@@ -106,6 +114,7 @@ func (m *BaseControllerRefManager) ClaimObject(obj metav1.Object, match func(met
 		return false, nil
 	}
 	// Selector matches. Try to adopt.
+	// 该rs的labels match deployment.spec.Selector，则修改该rs的ownerReferences为当前deployment相关信息
 	if err := adopt(obj); err != nil {
 		// If the pod no longer exists, ignore the error.
 		if errors.IsNotFound(err) {
@@ -301,16 +310,25 @@ func NewReplicaSetControllerRefManager(
 // If the error is nil, either the reconciliation succeeded, or no
 // reconciliation was necessary. The list of ReplicaSets that you now own is
 // returned.
+
+//找到deployment 对应的rs, 这些rs包括
+//1. rs.ownerReferences != nil && rs.ownerReferences.UID = deployment.UID && rs.Labels match deployment.spec.selector的rs
+//2. rs.ownerReferences == nil && rs.Labels match deployment.sepc.selector的rs
 func (m *ReplicaSetControllerRefManager) ClaimReplicaSets(sets []*extensions.ReplicaSet) ([]*extensions.ReplicaSet, error) {
 	var claimed []*extensions.ReplicaSet
 	var errlist []error
 
+	//检验rs的labels是否match deployment的deploy.spec.selector
 	match := func(obj metav1.Object) bool {
 		return m.Selector.Matches(labels.Set(obj.GetLabels()))
 	}
+
+	//当rs.ownerReferences == nil && rs.Labels match deployment.selector，此时将调用该函数修改rs.ownerReferences
 	adopt := func(obj metav1.Object) error {
 		return m.AdoptReplicaSet(obj.(*extensions.ReplicaSet))
 	}
+
+	//当rs.ownerReferences.UID == deployment.UID 但是 rs.Labels not match deployment.selector, 此时将调用该方法将rs从对象deployment中摘除，方法是删除rs.ownerReferences对应的deployment uid
 	release := func(obj metav1.Object) error {
 		return m.ReleaseReplicaSet(obj.(*extensions.ReplicaSet))
 	}

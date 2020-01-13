@@ -118,6 +118,7 @@ func NewDeploymentController(dInformer extensionsinformers.DeploymentInformer, r
 		Recorder:   dc.eventRecorder,
 	}
 
+	//? 将新增/更新后/删除的deploy无区分的放进queue中,那事后如何区分该deploy到底是什么事件产生的呢？
 	dInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    dc.addDeployment,
 		UpdateFunc: dc.updateDeployment,
@@ -207,6 +208,7 @@ func (dc *DeploymentController) addReplicaSet(obj interface{}) {
 	}
 
 	// If it has a ControllerRef, that's all that matters.
+	// 获取该rs所属的deploy，将其放入deploy queue中
 	if controllerRef := metav1.GetControllerOf(rs); controllerRef != nil {
 		d := dc.resolveControllerRef(rs.Namespace, controllerRef)
 		if d == nil {
@@ -256,6 +258,8 @@ func (dc *DeploymentController) getDeploymentsForReplicaSet(rs *extensions.Repli
 func (dc *DeploymentController) updateReplicaSet(old, cur interface{}) {
 	curRS := cur.(*extensions.ReplicaSet)
 	oldRS := old.(*extensions.ReplicaSet)
+
+	//如果新老rs ResourceVersion一样，则跳过此事件
 	if curRS.ResourceVersion == oldRS.ResourceVersion {
 		// Periodic resync will send update events for all known replica sets.
 		// Two different versions of the same replica set will always have different RVs.
@@ -265,6 +269,8 @@ func (dc *DeploymentController) updateReplicaSet(old, cur interface{}) {
 	curControllerRef := metav1.GetControllerOf(curRS)
 	oldControllerRef := metav1.GetControllerOf(oldRS)
 	controllerRefChanged := !reflect.DeepEqual(curControllerRef, oldControllerRef)
+
+	//如果是改变了rs归属deploy, 则将老的rs对应的deploy对象放入队列中
 	if controllerRefChanged && oldControllerRef != nil {
 		// The ControllerRef was changed. Sync the old controller, if any.
 		if d := dc.resolveControllerRef(oldRS.Namespace, oldControllerRef); d != nil {
@@ -273,6 +279,7 @@ func (dc *DeploymentController) updateReplicaSet(old, cur interface{}) {
 	}
 
 	// If it has a ControllerRef, that's all that matters.
+	//如果改变后的rs所属deployment不为空, 则将此deployment 入队列
 	if curControllerRef != nil {
 		d := dc.resolveControllerRef(curRS.Namespace, curControllerRef)
 		if d == nil {
@@ -283,6 +290,7 @@ func (dc *DeploymentController) updateReplicaSet(old, cur interface{}) {
 		return
 	}
 
+	// 说明该rs为孤儿rs
 	// Otherwise, it's an orphan. If anything changed, sync matching controllers
 	// to see if anyone wants to adopt it now.
 	labelChanged := !reflect.DeepEqual(curRS.Labels, oldRS.Labels)
@@ -301,6 +309,7 @@ func (dc *DeploymentController) updateReplicaSet(old, cur interface{}) {
 // deleteReplicaSet enqueues the deployment that manages a ReplicaSet when
 // the ReplicaSet is deleted. obj could be an *extensions.ReplicaSet, or
 // a DeletionFinalStateUnknown marker item.
+// 将删除的rs对应的deployment如队列
 func (dc *DeploymentController) deleteReplicaSet(obj interface{}) {
 	rs, ok := obj.(*extensions.ReplicaSet)
 
@@ -495,6 +504,9 @@ func (dc *DeploymentController) handleErr(err error, key interface{}) {
 // getReplicaSetsForDeployment uses ControllerRefManager to reconcile
 // ControllerRef by adopting and orphaning.
 // It returns the list of ReplicaSets that this Deployment should manage.
+// 找到deployment 对应的rs, 这些rs包括
+// 1. rs.ownerReferences != nil && rs.ownerReferences.UID = deployment.UID && rs.Labels match deployment.spec.selector的rs
+// 2. rs.ownerReferences == nil && rs.Labels match deployment.sepc.selector的rs
 func (dc *DeploymentController) getReplicaSetsForDeployment(d *extensions.Deployment) ([]*extensions.ReplicaSet, error) {
 	// List all ReplicaSets to find those we own but that no longer match our
 	// selector. They will be orphaned by ClaimReplicaSets().
@@ -508,6 +520,7 @@ func (dc *DeploymentController) getReplicaSetsForDeployment(d *extensions.Deploy
 	}
 	// If any adoptions are attempted, we should first recheck for deletion with
 	// an uncached quorum read sometime after listing ReplicaSets (see #42639).
+	//
 	canAdoptFunc := controller.RecheckDeletionTimestamp(func() (metav1.Object, error) {
 		fresh, err := dc.client.ExtensionsV1beta1().Deployments(d.Namespace).Get(d.Name, metav1.GetOptions{})
 		if err != nil {
@@ -565,10 +578,14 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 		glog.V(4).Infof("Finished syncing deployment %q (%v)", key, time.Since(startTime))
 	}()
 
+	//从key中拆分出该对象的namespace & name
+	//对于某类namespaced资源, namespace & name就能唯一确定该资源
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return err
 	}
+
+	//比如快速执行了两次删除操作, 第二次就会找不到该Depolyment，但是该删除事件还是会被监听到
 	deployment, err := dc.dLister.Deployments(namespace).Get(name)
 	if errors.IsNotFound(err) {
 		glog.V(2).Infof("Deployment %v has been deleted", key)
@@ -594,6 +611,9 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 
 	// List ReplicaSets owned by this Deployment, while reconciling ControllerRef
 	// through adoption/orphaning.
+	// 找到deployment 对应的rs, 这些rs包括
+	// 1. rs.ownerReferences != nil && rs.ownerReferences.UID = deployment.UID && rs.Labels match deployment.spec.selector的rs
+	// 2. rs.ownerReferences == nil && rs.Labels match deployment.sepc.selector的rs
 	rsList, err := dc.getReplicaSetsForDeployment(d)
 	if err != nil {
 		return err
@@ -603,11 +623,14 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 	//
 	// * check if a Pod is labeled correctly with the pod-template-hash label.
 	// * check that no old Pods are running in the middle of Recreate Deployments.
+	// 获取每个rs所对应的pod列表列表,形式为map[rs.UID] = podList
 	podMap, err := dc.getPodMapForDeployment(d, rsList)
 	if err != nil {
 		return err
 	}
 
+	//如果该deploy的deletionTimestamp非空,表示该deploy被删除,此时只更新该deploy状态即可。
+	//删除deployment会走到此
 	if d.DeletionTimestamp != nil {
 		return dc.syncStatusOnly(d, rsList, podMap)
 	}
@@ -619,6 +642,8 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 		return err
 	}
 
+	// 修改了deployment的spec.paused字段 | 新增了spec.paused = true的deployment
+	// puase deployment | 修改pause = true 会走到此
 	if d.Spec.Paused {
 		return dc.sync(d, rsList, podMap)
 	}
@@ -626,18 +651,23 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 	// rollback is not re-entrant in case the underlying replica sets are updated with a new
 	// revision so we should ensure that we won't proceed to update replica sets until we
 	// make sure that the deployment has cleaned up its rollback spec in subsequent enqueues.
+	// 回滚deployment会走到此
 	if d.Spec.RollbackTo != nil {
 		return dc.rollback(d, rsList, podMap)
 	}
 
+	//判断此次event是否为实例调整
+	//实例调整事件会走到此
 	scalingEvent, err := dc.isScalingEvent(d, rsList, podMap)
 	if err != nil {
 		return err
 	}
 	if scalingEvent {
+		// 调整deployment实例数会走到此
 		return dc.sync(d, rsList, podMap)
 	}
 
+	//别的事件会走到此, 比如创建新的deployment, 镜像修改，Pod参数修改等等
 	switch d.Spec.Strategy.Type {
 	case extensions.RecreateDeploymentStrategyType:
 		return dc.rolloutRecreate(d, rsList, podMap)

@@ -660,9 +660,13 @@ func FindNewReplicaSet(deployment *extensions.Deployment, rsList []*extensions.R
 
 // FindOldReplicaSets returns the old replica sets targeted by the given Deployment, with the given slice of RSes.
 // Note that the first set of old replica sets doesn't include the ones with no pods, and the second set of old replica sets include all old replica sets.
+// 从该deployment的所有rs中，找出oldRss集合,
 func FindOldReplicaSets(deployment *extensions.Deployment, rsList []*extensions.ReplicaSet) ([]*extensions.ReplicaSet, []*extensions.ReplicaSet) {
 	var requiredRSs []*extensions.ReplicaSet
 	var allRSs []*extensions.ReplicaSet
+
+	//从所有rs中(按照createTimestamp从大至小)找出newRS，即rs.spec.template = deployment.spec.template的rs
+	//有可能有多个rs满足条件，取createTimestamp最大的、即最新的那个， 其他都是oldRS
 	newRS := FindNewReplicaSet(deployment, rsList)
 	for _, rs := range rsList {
 		// Filter out new replica set
@@ -738,6 +742,7 @@ func SetFromReplicaSetTemplate(deployment *extensions.Deployment, template v1.Po
 }
 
 // GetReplicaCountForReplicaSets returns the sum of Replicas of the given replica sets.
+// 统计给定rs中spec.Replicas总和
 func GetReplicaCountForReplicaSets(replicaSets []*extensions.ReplicaSet) int32 {
 	totalReplicas := int32(0)
 	for _, rs := range replicaSets {
@@ -771,6 +776,7 @@ func GetReadyReplicaCountForReplicaSets(replicaSets []*extensions.ReplicaSet) in
 }
 
 // GetAvailableReplicaCountForReplicaSets returns the number of available pods corresponding to the given replica sets.
+// 从所有rs中统计出available pods的总数，方式是各rs.Status.AvailableReplicas相加
 func GetAvailableReplicaCountForReplicaSets(replicaSets []*extensions.ReplicaSet) int32 {
 	totalAvailableReplicas := int32(0)
 	for _, rs := range replicaSets {

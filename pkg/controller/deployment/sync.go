@@ -49,6 +49,8 @@ func (dc *DeploymentController) syncStatusOnly(d *extensions.Deployment, rsList 
 // sync is responsible for reconciling deployments on scaling events or when they
 // are paused.
 func (dc *DeploymentController) sync(d *extensions.Deployment, rsList []*extensions.ReplicaSet, podMap map[types.UID]*v1.PodList) error {
+	//从所有rs中(按照createTimestamp从大至小)找出newRS，即rs.spec.template = deployment.spec.template的rs
+	//有可能有多个rs满足条件，取createTimestamp最大的、即最新的那个， 其他都是oldRS
 	newRS, oldRSs, err := dc.getAllReplicaSetsAndSyncRevision(d, rsList, podMap, false)
 	if err != nil {
 		return err
@@ -122,6 +124,9 @@ func (dc *DeploymentController) getAllReplicaSetsAndSyncRevision(d *extensions.D
 	if err != nil {
 		return nil, nil, fmt.Errorf("error labeling replica sets and pods with pod-template-hash: %v", err)
 	}
+
+	//从所有rs中(按照createTimestamp从大至小)找出newRS，即rs.spec.template = deployment.spec.template的rs
+	//有可能有多个rs满足条件，取createTimestamp最大的、即最新的那个， 其他都是oldRS
 	_, allOldRSs := deploymentutil.FindOldReplicaSets(d, rsList)
 
 	// Get new replica set with the updated revision number
@@ -235,6 +240,7 @@ func (dc *DeploymentController) getNewReplicaSet(d *extensions.Deployment, rsLis
 	existingNewRS := deploymentutil.FindNewReplicaSet(d, rsList)
 
 	// Calculate the max revision number among all old RSes
+	// 从oldRSS中找出最大的revision
 	maxOldRevision := deploymentutil.MaxRevision(oldRSs)
 	// Calculate revision number for this new replica set
 	newRevision := strconv.FormatInt(maxOldRevision+1, 10)
@@ -243,6 +249,7 @@ func (dc *DeploymentController) getNewReplicaSet(d *extensions.Deployment, rsLis
 	// annotationsToSkip from the parent deployment, and update revision, desiredReplicas,
 	// and maxReplicas) and also update the revision annotation in the deployment with the
 	// latest revision.
+	// 如果存在newRS
 	if existingNewRS != nil {
 		rsCopy := existingNewRS.DeepCopy()
 
@@ -276,11 +283,13 @@ func (dc *DeploymentController) getNewReplicaSet(d *extensions.Deployment, rsLis
 		return rsCopy, nil
 	}
 
+	//如果没有找到newRS，则返回。
+	//ex: 创建新deployment
 	if !createIfNotExisted {
 		return nil, nil
 	}
 
-	// new ReplicaSet does not exist, create one.
+	// new ReplicaSet does not exist, create one. 即按照d.Spec.Template为标准，创建新的RS
 	newRSTemplate := *d.Spec.Template.DeepCopy()
 	podTemplateSpecHash := fmt.Sprintf("%d", controller.ComputeHash(&newRSTemplate, d.Status.CollisionCount))
 	newRSTemplate.Labels = labelsutil.CloneAndAddLabel(d.Spec.Template.Labels, extensions.DefaultDeploymentUniqueLabelKey, podTemplateSpecHash)
@@ -577,7 +586,10 @@ func (dc *DeploymentController) syncDeploymentStatus(allRSs []*extensions.Replic
 
 // calculateStatus calculates the latest status for the provided deployment by looking into the provided replica sets.
 func calculateStatus(allRSs []*extensions.ReplicaSet, newRS *extensions.ReplicaSet, deployment *extensions.Deployment) extensions.DeploymentStatus {
+	// 从所有rs中统计出available pods的总数，方式是各rs.Status.AvailableReplicas相加
 	availableReplicas := deploymentutil.GetAvailableReplicaCountForReplicaSets(allRSs)
+
+	// 统计给定rs中spec.Replicas总和
 	totalReplicas := deploymentutil.GetReplicaCountForReplicaSets(allRSs)
 	unavailableReplicas := totalReplicas - availableReplicas
 	// If unavailableReplicas is negative, then that means the Deployment has more available replicas running than
@@ -589,7 +601,7 @@ func calculateStatus(allRSs []*extensions.ReplicaSet, newRS *extensions.ReplicaS
 	status := extensions.DeploymentStatus{
 		// TODO: Ensure that if we start retrying status updates, we won't pick up a new Generation value.
 		ObservedGeneration:  deployment.Generation,
-		Replicas:            deploymentutil.GetActualReplicaCountForReplicaSets(allRSs),
+		Replicas:            deploymentutil.GetActualReplicaCountForReplicaSets(allRSs),  //各rs.Status.AvailableReplicas相加
 		UpdatedReplicas:     deploymentutil.GetActualReplicaCountForReplicaSets([]*extensions.ReplicaSet{newRS}),
 		ReadyReplicas:       deploymentutil.GetReadyReplicaCountForReplicaSets(allRSs),
 		AvailableReplicas:   availableReplicas,
@@ -619,12 +631,16 @@ func calculateStatus(allRSs []*extensions.ReplicaSet, newRS *extensions.ReplicaS
 //
 // rsList should come from getReplicaSetsForDeployment(d).
 // podMap should come from getPodMapForDeployment(d, rsList).
+// 判断此次更新是否为实例调整，通过判定deployment.spec.Replicas是否和rs的Replicas相等
 func (dc *DeploymentController) isScalingEvent(d *extensions.Deployment, rsList []*extensions.ReplicaSet, podMap map[types.UID]*v1.PodList) (bool, error) {
 	newRS, oldRSs, err := dc.getAllReplicaSetsAndSyncRevision(d, rsList, podMap, false)
 	if err != nil {
 		return false, err
 	}
 	allRSs := append(oldRSs, newRS)
+	//从所有的rs中找出activeRS，activeRS即rs.Spec.Replicas>0的rs
+	//注意已经没有再用的rs，即oldRS的spec.Replicas是等于0的，之前一直以为不会变(知识点)
+	//那这样的话，直接看newRS的replicas不就可以了吗？
 	for _, rs := range controller.FilterActiveReplicaSets(allRSs) {
 		desired, ok := deploymentutil.GetDesiredReplicasAnnotation(rs)
 		if !ok {
