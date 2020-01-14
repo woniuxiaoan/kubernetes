@@ -136,7 +136,7 @@ func (dc *DeploymentController) reconcileOldReplicaSets(allRSs []*extensions.Rep
 
 	// Clean up unhealthy replicas first, otherwise unhealthy replicas will block deployment
 	// and cause timeout. See https://github.com/kubernetes/kubernetes/issues/16737
-	oldRSs, cleanupCount, err := dc.cleanupUnhealthyReplicas(oldRSs, deployment, maxScaledDown)
+	oldRSs, cleanupCount, err := dc.cleanupUnheathyReplicas(oldRSs, deployment, maxScaledDown)
 	if err != nil {
 		return false, nil
 	}
@@ -198,7 +198,10 @@ func (dc *DeploymentController) scaleDownOldReplicaSetsForRollingUpdate(allRSs [
 	// Check if we can scale down.
 	minAvailable := *(deployment.Spec.Replicas) - maxUnavailable
 	// Find the number of available pods.
+	// 获取所有rs中处在available状态的pod数量
 	availablePodCount := deploymentutil.GetAvailableReplicaCountForReplicaSets(allRSs)
+
+	// 如果所有可用的数量小于最小可用数量,则老的rs不在scaleDown
 	if availablePodCount <= minAvailable {
 		// Cannot scale down.
 		return 0, nil
@@ -208,7 +211,11 @@ func (dc *DeploymentController) scaleDownOldReplicaSetsForRollingUpdate(allRSs [
 	sort.Sort(controller.ReplicaSetsByCreationTimestamp(oldRSs))
 
 	totalScaledDown := int32(0)
+	// 满足最少可用的状态下, 所有老实例可以down的实例数总和
 	totalScaleDownCount := availablePodCount - minAvailable
+
+	//按照创建时间从远至近排序所有rs
+	//依次从rs中scale down一定数量的pod，满足totalScaleDownCount数量
 	for _, targetRS := range oldRSs {
 		if totalScaledDown >= totalScaleDownCount {
 			// No further scaling required.
@@ -232,5 +239,6 @@ func (dc *DeploymentController) scaleDownOldReplicaSetsForRollingUpdate(allRSs [
 		totalScaledDown += scaleDownCount
 	}
 
+	//返回scaleDown的pod数量
 	return totalScaledDown, nil
 }
