@@ -27,14 +27,19 @@ import (
 // rolloutRecreate implements the logic for recreating a replica set.
 func (dc *DeploymentController) rolloutRecreate(d *extensions.Deployment, rsList []*extensions.ReplicaSet, podMap map[types.UID]*v1.PodList) error {
 	// Don't create a new RS if not already existed, so that we avoid scaling up before scaling down.
+	// ex: 有一个strategy.type = Recreate的deployment, 然后我们改动该deployment.spec.template.metadata.labels 此时d 就是改之后的deployment
+	// 那么此时newRS就为nil, 因为没有rs.spec.template == deployment.spec.template，所有的rs都是oldRS
 	newRS, oldRSs, err := dc.getAllReplicaSetsAndSyncRevision(d, rsList, podMap, false)
 	if err != nil {
 		return err
 	}
+
 	allRSs := append(oldRSs, newRS)
+	// 找到activeOldRS，即deployment更新前对应的rs
 	activeOldRSs := controller.FilterActiveReplicaSets(oldRSs)
 
 	// scale down old replica sets.
+	// 将activeOldRSs的replicas都调为0(符合Recreate策略)
 	scaledDown, err := dc.scaleDownOldReplicaSetsForRecreate(activeOldRSs, d)
 	if err != nil {
 		return err
@@ -45,7 +50,10 @@ func (dc *DeploymentController) rolloutRecreate(d *extensions.Deployment, rsList
 	}
 
 	// Do not process a deployment when it has old pods running.
+	// 等待所有oldRS的Pod都不在running
 	if oldPodsRunning(newRS, oldRSs, podMap) {
+
+		// 更新rs状态，注意此时会触发rs更新事件，然后又跳回到该函数， 一次循环直至oldPodsRunning为false, 然后进入下面逻辑
 		return dc.syncRolloutStatus(allRSs, newRS, d)
 	}
 
