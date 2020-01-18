@@ -133,7 +133,7 @@ func (c *customMetricsClient) GetObjectMetric(metricName string, namespace strin
 		// supposed to allow you to escape your namespace
 		metricValue, err = c.client.RootScopedMetrics().GetForObject(gvk.GroupKind(), namespace, metricName)
 	} else {
-		metricValue, err = c.client.NamespacedMetrics(namespace).GetForObject(gvk.GroupKind(), objectRef.Name, metricName)
+		metricValue, err = c.client.cc(namespace).GetForObject(gvk.GroupKind(), objectRef.Name, metricName)
 	}
 
 	if err != nil {

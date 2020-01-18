@@ -164,14 +164,20 @@ func (dc *DeploymentController) rsAndPodsWithHashKeySynced(d *extensions.Deploym
 // 3. Add hash label to the rs's label and selector
 func (dc *DeploymentController) addHashKeyToRSAndPods(rs *extensions.ReplicaSet, podList *v1.PodList, collisionCount *int32) (*extensions.ReplicaSet, error) {
 	// If the rs already has the new hash label in its selector, it's done syncing
+	// 判断rs.Spec.Selector 是否含有 pod-template-hash
 	if labelsutil.SelectorHasLabel(rs.Spec.Selector, extensions.DefaultDeploymentUniqueLabelKey) {
 		return rs, nil
 	}
+
+	// 删除rs.Spec.Template.Labels中的 pod-template-hash key(如果有的话)
+	// 然后利用rs.Spec.Template 生成 pod-template-hash key
 	hash, err := deploymentutil.GetReplicaSetHash(rs, collisionCount)
 	if err != nil {
 		return nil, err
 	}
+
 	// 1. Add hash template label to the rs. This ensures that any newly created pods will have the new label.
+	// 利用param2 和 param4 获取对应rs， 然后利用param5更新前面的rs.Template.Labels (增加pod-template-hash)， 然后利用param1更新该rs
 	updatedRS, err := deploymentutil.UpdateRSWithRetries(dc.client.ExtensionsV1beta1().ReplicaSets(rs.Namespace), dc.rsLister, rs.Namespace, rs.Name,
 		func(updated *extensions.ReplicaSet) error {
 			// Precondition: the RS doesn't contain the new hash in its pod template label.
@@ -212,6 +218,7 @@ func (dc *DeploymentController) addHashKeyToRSAndPods(rs *extensions.ReplicaSet,
 
 	// 3. Update rs label and selector to include the new hash label
 	// Copy the old selector, so that we can scrub out any orphaned pods
+	// 更新rs.Spec.Seletor, 增加pod-template-hash key
 	updatedRS, err = deploymentutil.UpdateRSWithRetries(dc.client.ExtensionsV1beta1().ReplicaSets(rs.Namespace), dc.rsLister, rs.Namespace, rs.Name, func(updated *extensions.ReplicaSet) error {
 		// Precondition: the RS doesn't contain the new hash in its label and selector.
 		if updated.Labels[extensions.DefaultDeploymentUniqueLabelKey] == hash && updated.Spec.Selector.MatchLabels[extensions.DefaultDeploymentUniqueLabelKey] == hash {
@@ -593,7 +600,7 @@ func calculateStatus(allRSs []*extensions.ReplicaSet, newRS *extensions.ReplicaS
 	// 从所有rs中统计出available pods的总数，方式是各rs.Status.AvailableReplicas相加
 	availableReplicas := deploymentutil.GetAvailableReplicaCountForReplicaSets(allRSs)
 
-	// 统计给定rs中spec.Replicas总和
+	// 统计给定rs中rs.spec.Replicas总和
 	totalReplicas := deploymentutil.GetReplicaCountForReplicaSets(allRSs)
 	unavailableReplicas := totalReplicas - availableReplicas
 	// If unavailableReplicas is negative, then that means the Deployment has more available replicas running than
@@ -605,7 +612,7 @@ func calculateStatus(allRSs []*extensions.ReplicaSet, newRS *extensions.ReplicaS
 	status := extensions.DeploymentStatus{
 		// TODO: Ensure that if we start retrying status updates, we won't pick up a new Generation value.
 		ObservedGeneration:  deployment.Generation,
-		Replicas:            deploymentutil.GetActualReplicaCountForReplicaSets(allRSs),  //各rs.Status.AvailableReplicas相加
+		Replicas:            deploymentutil.GetActualReplicaCountForReplicaSets(allRSs),  //各rs.Status.Replicas相加
 		UpdatedReplicas:     deploymentutil.GetActualReplicaCountForReplicaSets([]*extensions.ReplicaSet{newRS}),
 		ReadyReplicas:       deploymentutil.GetReadyReplicaCountForReplicaSets(allRSs),
 		AvailableReplicas:   availableReplicas,
@@ -635,7 +642,7 @@ func calculateStatus(allRSs []*extensions.ReplicaSet, newRS *extensions.ReplicaS
 //
 // rsList should come from getReplicaSetsForDeployment(d).
 // podMap should come from getPodMapForDeployment(d, rsList).
-// 判断此次更新是否为实例调整，通过判定deployment.spec.Replicas是否和rs的Replicas相等
+// 判断此次更新是否为实例调整，通过判定deployment.spec.Replicas是否和active rs的Replicas相等
 func (dc *DeploymentController) isScalingEvent(d *extensions.Deployment, rsList []*extensions.ReplicaSet, podMap map[types.UID]*v1.PodList) (bool, error) {
 	newRS, oldRSs, err := dc.getAllReplicaSetsAndSyncRevision(d, rsList, podMap, false)
 	if err != nil {
@@ -643,8 +650,6 @@ func (dc *DeploymentController) isScalingEvent(d *extensions.Deployment, rsList 
 	}
 	allRSs := append(oldRSs, newRS)
 	//从所有的rs中找出activeRS，activeRS即rs.Spec.Replicas>0的rs
-	//注意已经没有再用的rs，即oldRS的spec.Replicas是等于0的，之前一直以为不会变(知识点)
-	//那这样的话，直接看newRS的replicas不就可以了吗？
 	for _, rs := range controller.FilterActiveReplicaSets(allRSs) {
 		desired, ok := deploymentutil.GetDesiredReplicasAnnotation(rs)
 		if !ok {

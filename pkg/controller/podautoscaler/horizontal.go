@@ -371,6 +371,22 @@ func (a *HorizontalController) reconcileKey(key string) error {
 	return a.reconcileAutoscaler(hpa)
 }
 
+/*
+以ivankaqrain为例子
+{
+	maxReplicas: 3
+    minReplicas: 1
+    scaleTargetRef:
+      kind: Deployment
+      name: ivankaqrain
+      apiVersion: apps/v1beta2
+    metrics:
+    - type: Pods
+      pod:
+        metricName: k8s_rate_example
+        targetAverageValue: '300'
+}
+*/
 func (a *HorizontalController) reconcileAutoscaler(hpav1Shared *autoscalingv1.HorizontalPodAutoscaler) error {
 	// make a copy so that we never mutate the shared informer cache (conversion can mutate the object)
 	hpav1 := hpav1Shared.DeepCopy()
@@ -383,6 +399,7 @@ func (a *HorizontalController) reconcileAutoscaler(hpav1Shared *autoscalingv1.Ho
 	hpa := hpaRaw.(*autoscalingv2.HorizontalPodAutoscaler)
 	hpaStatusOriginal := hpa.Status.DeepCopy()
 
+	// reference = /deployment/ivanka/ivankaqrain
 	reference := fmt.Sprintf("%s/%s/%s", hpa.Spec.ScaleTargetRef.Kind, hpa.Namespace, hpa.Spec.ScaleTargetRef.Name)
 
 	targetGV, err := schema.ParseGroupVersion(hpa.Spec.ScaleTargetRef.APIVersion)
@@ -393,6 +410,7 @@ func (a *HorizontalController) reconcileAutoscaler(hpav1Shared *autoscalingv1.Ho
 		return fmt.Errorf("invalid API version in scale target reference: %v", err)
 	}
 
+	// {Group: "apps", Kind: "deployment"}
 	targetGK := schema.GroupKind{
 		Group: targetGV.Group,
 		Kind:  hpa.Spec.ScaleTargetRef.Kind,
@@ -618,6 +636,7 @@ func (a *HorizontalController) shouldScale(hpa *autoscalingv2.HorizontalPodAutos
 // in turn until a working one is found.  If none work, the first error
 // is returned.  It returns both the scale, as well as the group-resource from
 // the working mapping.
+// 比如 namespace: ivanka, name: ivankaqrain-20200101t101010
 func (a *HorizontalController) scaleForResourceMappings(namespace, name string, mappings []*apimeta.RESTMapping) (*autoscalingv1.Scale, schema.GroupResource, error) {
 	var firstErr error
 	for i, mapping := range mappings {

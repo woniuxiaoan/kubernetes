@@ -154,6 +154,7 @@ func (dc *DeploymentController) Run(workers int, stopCh <-chan struct{}) {
 	glog.Infof("Starting deployment controller")
 	defer glog.Infof("Shutting down deployment controller")
 
+	//等待三个缓存都更新完成, 返回true表示都更新完毕，否则表示因为某些原因更新失败， controller should shutdown
 	if !controller.WaitForCacheSync("deployment", stopCh, dc.dListerSynced, dc.rsListerSynced, dc.podListerSynced) {
 		return
 	}
@@ -181,6 +182,7 @@ func (dc *DeploymentController) updateDeployment(old, cur interface{}) {
 func (dc *DeploymentController) deleteDeployment(obj interface{}) {
 	d, ok := obj.(*extensions.Deployment)
 	if !ok {
+		// 待理解 todo
 		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
 		if !ok {
 			utilruntime.HandleError(fmt.Errorf("Couldn't get object from tombstone %#v", obj))
@@ -200,6 +202,7 @@ func (dc *DeploymentController) deleteDeployment(obj interface{}) {
 func (dc *DeploymentController) addReplicaSet(obj interface{}) {
 	rs := obj.(*extensions.ReplicaSet)
 
+	//如果新增的rs DeletionTimestamp不为nil
 	if rs.DeletionTimestamp != nil {
 		// On a restart of the controller manager, it's possible for an object to
 		// show up in a state that is already pending deletion.
@@ -221,6 +224,7 @@ func (dc *DeploymentController) addReplicaSet(obj interface{}) {
 
 	// Otherwise, it's an orphan. Get a list of all matching Deployments and sync
 	// them to see if anyone wants to adopt it.
+	// 获取rs对应的deployment, 即rs.metadata.Labels match deployment.Selector
 	ds := dc.getDeploymentsForReplicaSet(rs)
 	if len(ds) == 0 {
 		return
@@ -273,6 +277,7 @@ func (dc *DeploymentController) updateReplicaSet(old, cur interface{}) {
 	//如果是改变了rs归属deploy, 则将老的rs对应的deploy对象放入队列中
 	if controllerRefChanged && oldControllerRef != nil {
 		// The ControllerRef was changed. Sync the old controller, if any.
+		// 如果修改了rs的controllerRef， 则将修改前对应的deployment 入队列
 		if d := dc.resolveControllerRef(oldRS.Namespace, oldControllerRef); d != nil {
 			dc.enqueueDeployment(d)
 		}
@@ -440,6 +445,8 @@ func (dc *DeploymentController) getDeploymentForPod(pod *v1.Pod) *extensions.Dep
 	if controllerRef == nil {
 		return nil
 	}
+
+	//从controllerRef中解析出对应的deployment
 	return dc.resolveControllerRef(rs.Namespace, controllerRef)
 }
 
@@ -545,6 +552,7 @@ func (dc *DeploymentController) getPodMapForDeployment(d *extensions.Deployment,
 	if err != nil {
 		return nil, err
 	}
+	// 获取所有metadata.labels match  deploymet.spec.Selector的所以Pod
 	pods, err := dc.podLister.Pods(d.Namespace).List(selector)
 	if err != nil {
 		return nil, err
@@ -557,6 +565,7 @@ func (dc *DeploymentController) getPodMapForDeployment(d *extensions.Deployment,
 	for _, pod := range pods {
 		// Do not ignore inactive Pods because Recreate Deployments need to verify that no
 		// Pods from older versions are running before spinning up new Pods.
+		// 丢掉掉没有controllerRef的pod
 		controllerRef := metav1.GetControllerOf(pod)
 		if controllerRef == nil {
 			continue
@@ -600,6 +609,8 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 	d := deployment.DeepCopy()
 
 	everything := metav1.LabelSelector{}
+
+	//该deployment 没有设定 spec.selector, 返回
 	if reflect.DeepEqual(d.Spec.Selector, &everything) {
 		dc.eventRecorder.Eventf(d, v1.EventTypeWarning, "SelectingAll", "This deployment is selecting all pods. A non-empty selector is required.")
 		if d.Status.ObservedGeneration < d.Generation {
@@ -624,6 +635,7 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 	// * check if a Pod is labeled correctly with the pod-template-hash label.
 	// * check that no old Pods are running in the middle of Recreate Deployments.
 	// 获取每个rs所对应的pod列表列表,形式为map[rs.UID] = podList
+	// 获取deployment.spec.selector 所有的Pod，然后按照pod.ownerreference 分rsList
 	podMap, err := dc.getPodMapForDeployment(d, rsList)
 	if err != nil {
 		return err

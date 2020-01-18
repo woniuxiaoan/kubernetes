@@ -66,6 +66,7 @@ func UpdateRSWithRetries(rsClient unversionedextensions.ReplicaSetInterface, rsL
 // GetReplicaSetHash returns the pod template hash of a ReplicaSet's pod template space
 func GetReplicaSetHash(rs *extensions.ReplicaSet, uniquifier *int32) (string, error) {
 	rsTemplate := rs.Spec.Template.DeepCopy()
+	//删除rsTemplate.Labels中的pod-template-hash 这个key, 如果有的话
 	rsTemplate.Labels = labelsutil.CloneAndRemoveLabel(rsTemplate.Labels, extensions.DefaultDeploymentUniqueLabelKey)
 	return fmt.Sprintf("%d", controller.ComputeHash(rsTemplate, uniquifier)), nil
 }
