@@ -83,8 +83,7 @@ func MetaNamespaceIndexFunc(obj interface{}) ([]string, error) {
 //例如 indexName = "byUser", indexKey = "wooniu", objKey = "pod1"
 
 // Index maps the indexed value to a set of keys in the store that match on that value
-// 比如找Podname有很多维度， 比如某一个namespace的所有podname，同一个节点的所有podname， 同一个service的所有podname...
-// 所有Index的key表示的一个维度。
+// 找Pod有很多维度， 比如某一个namespace的所有podname，同一个节点的所有podname， 同一个service的所有podname, Index的key表示的一个维度。
 // 例如： Index = {"ivanka":[]string{"pod1","pod2"}, "wits":[]string{"pod3","pod4"}}
 // "ivanka", "wits" 都是按照NsIndexFunc(obj) 这个IndexFunc生成的
 type Index map[string]sets.String
@@ -92,26 +91,34 @@ type Index map[string]sets.String
 // Indexers maps a name to a IndexFunc
 // 例如:
 // Indexers := {
-//	 "byNamespace": NsIndexFunc,
-//	 "byServiceName": SvcIndexFunc,
-//	 "byNode": NodeIndexFunc,
+//	 "namespace": NsIndexFunc,
+//	 "serviceName": SvcIndexFunc,
+//	 "node": NodeIndexFunc,
 // }
 type Indexers map[string]IndexFunc
 
-// Indices maps a name to an Index
-// 例如
-// Indeces := {
-//	 "byNamespace": {
-//		 "ivanka":{"pod1","pod2"},
-//		 "wits":{"pod3","pod4"}
-//	 },
-//	 "byServiceName": {
-//	 	 "ivankaqrain": {"pod5","pod6"},
-//	 	 "ivankacontent": {"pod7", "pod8"}
-//	 },
-//	 "byNode": {
-//	 	 "node1": {"pod9","pod10"},
-//	 	 "node2": {"pod11", "pod12"}
-//	 }
-// }
+/* Indices maps a name to an Index
+例如
+Indices := {
+	 "namespace": {
+		 "ivanka":{"ivanka/pod1","ivanka/pod2"},
+		 "wits":{"wits/pod3","wits/pod4"}
+	 },
+	 "svc": {
+	 	 "ivankaqrain": {"ivanka/pod5","ivanka/pod6"},
+	 	 "ivankacontent": {"ivnaka/pod7", "ivanka/pod8"}
+	 },
+	 "node": {
+	 	 "node1": {"default/pod9","ivanka/pod10"},
+	 	 "node2": {"ivanka/pod11", "wits/pod12"}
+	 }
+}
+
+Indexers := {
+	"namespace": GetNsFromObjFunc,
+	"svc": GetSvcFromObjFunc,
+	"node": GetNodeFromObjFunc
+}
+
+*/
 type Indices map[string]Index

@@ -94,8 +94,12 @@ func NewDeltaFIFO(keyFunc KeyFunc, knownObjects KeyListerGetter) *DeltaFIFO {
 // items have been deleted when Replace() or Delete() are called. The deleted
 // object will be included in the DeleteFinalStateUnknown markers. These objects
 // could be stale.
-// DeltaFIFO就是一个按序的(先入先出)kubernetes对象变化的队列,基本操作单位是Delta
-// DeltaFIFO是Queue一种实现
+// DeltaFIFO.items 就是一个按序的(先入先出)kubernetes对象变化的队列,基本操作单位是Delta
+// items, queue是存储 listAndWatch 从apiserver拿来的对象的
+// knownObjects则是本地存储localStorage，实现类则是&threadSaftMap
+// case1: 连续更新统一资源, 会产生多个Update Delta, 这些是不能合并的
+// case2: 连续删除统一资源, 会产生多个Delete Delta, 这些Delta会被合并
+// case3: watch了一个Delete Delta 存入了items, 然后来了一个Sync Delta, 此时这个Sync Delta就没有存入items的必要了
 type DeltaFIFO struct {
 	// lock/cond protects access to 'items' and 'queue'.
 	lock sync.RWMutex
@@ -168,6 +172,8 @@ func (f *DeltaFIFO) KeyOf(obj interface{}) (string, error) {
 // Return true if an Add/Update/Delete/AddIfNotPresent are called first,
 // or an Update called first but the first batch of items inserted by Replace() has been popped
 // 说明此次数据已经完全同步至了localstore
+// DeltaFIFO每成功执行一次Pop, initalPopulationCount 就减一
+// 当第一次list的全量全都成功Pop出之后, 就代表本次同步成功了, 这也就代表list的数据全都写入localStorage了
 func (f *DeltaFIFO) HasSynced() bool {
 	f.lock.Lock()
 	defer f.lock.Unlock()
@@ -312,6 +318,7 @@ func isDeletionDup(a, b *Delta) *Delta {
 // willObjectBeDeletedLocked returns true only if the last delta for the
 // given object is Delete. Caller must lock first.
 func (f *DeltaFIFO) willObjectBeDeletedLocked(id string) bool {
+	// items[id]可以有多个对象, 因为一个对象可能会有很多动作, 比如创建，然后删除
 	deltas := f.items[id]
 	return len(deltas) > 0 && deltas[len(deltas)-1].Type == Deleted
 }
@@ -328,6 +335,7 @@ func (f *DeltaFIFO) queueActionLocked(actionType DeltaType, obj interface{}) err
 	// then we should ignore Sync events, because it would result in
 	// recreation of this object.
 	// willObjectBeDeletedLocked = true表示该对象最新的一次操作是删除，同步对于已删除的对象来讲是没有意义的
+	// actionType == Sync 表示这个操作是listAndwatch里的list调用触发的, 用来写入localStorage的
 	if actionType == Sync && f.willObjectBeDeletedLocked(id) {
 		return nil
 	}
@@ -482,12 +490,15 @@ func (f *DeltaFIFO) Pop(process PopProcessFunc) (interface{}, error) {
 // will contain the items in the map, in no particular order.
 // 只有Replace函数能触发initialPopulationCount ++
 // Replace拉到的是全量数据, 也就是list是全量数据, 比如全量的Pods等等。
+// resourceVersion是list api-server后, 得到的resourceVersion
+// 至于list为什么要返回resourceVersion可参考[https://github.com/kubernetes/kubernetes/issues/2171]
 func (f *DeltaFIFO) Replace(list []interface{}, resourceVersion string) error {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 	keys := make(sets.String, len(list))
 
 	//Replace就是同步用的，所以他产生的事件都是Sync
+	//key的格式为{namespace}/{name}
 	for _, item := range list {
 		key, err := f.KeyOf(item)
 		if err != nil {

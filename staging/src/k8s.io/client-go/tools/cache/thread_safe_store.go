@@ -274,7 +274,6 @@ func TestMultiIndexKeys(t *testing.T) {
 	index.Add(pod1)
 	index.Add(pod2)
 }
-
 */
 	for name, indexFunc := range c.indexers {
 		// 此时indexFunc = testUsersIndexFunc， indexValues = []string{"ernie","bert"}
