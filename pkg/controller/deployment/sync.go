@@ -63,6 +63,7 @@ func (dc *DeploymentController) sync(d *extensions.Deployment, rsList []*extensi
 
 	// Clean up the deployment when it's paused and no rollback is in flight.
 	if d.Spec.Paused && d.Spec.RollbackTo == nil {
+		// 清理掉超出revisionHistoryLimit个数的olsRSs
 		if err := dc.cleanupDeployment(oldRSs, d); err != nil {
 			return err
 		}
@@ -149,6 +150,8 @@ func (dc *DeploymentController) rsAndPodsWithHashKeySynced(d *extensions.Deploym
 		// Add pod-template-hash information if it's not in the RS.
 		// Otherwise, new RS produced by Deployment will overlap with pre-existing ones
 		// that aren't constrained by the pod-template-hash.
+		// 为rs.Spec.Selector 以及 rs.Spec.Template.Labels 都增加pod-template-hash key
+		// 为podMap[rs.UID]里面的pod.Spec.Labels增加pod-template-hash key
 		syncedRS, err := dc.addHashKeyToRSAndPods(rs, podMap[rs.UID], d.Status.CollisionCount)
 		if err != nil {
 			return nil, err
@@ -545,6 +548,7 @@ func (dc *DeploymentController) scaleReplicaSet(rs *extensions.ReplicaSet, newSc
 // cleanupDeployment is responsible for cleaning up a deployment ie. retains all but the latest N old replica sets
 // where N=d.Spec.RevisionHistoryLimit. Old replica sets are older versions of the podtemplate of a deployment kept
 // around by default 1) for historical reasons and 2) for the ability to rollback a deployment.
+// 清理掉超出spec.RevisionHistoryLimit个数的replicaSet
 func (dc *DeploymentController) cleanupDeployment(oldRSs []*extensions.ReplicaSet, deployment *extensions.Deployment) error {
 	if deployment.Spec.RevisionHistoryLimit == nil {
 		return nil

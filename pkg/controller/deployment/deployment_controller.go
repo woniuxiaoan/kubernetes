@@ -580,6 +580,7 @@ func (dc *DeploymentController) getPodMapForDeployment(d *extensions.Deployment,
 
 // syncDeployment will sync the deployment with the given key.
 // This function is not meant to be invoked concurrently with the same key.
+// 针对deployment的增删改事件产生的key 都会进入该逻辑中
 func (dc *DeploymentController) syncDeployment(key string) error {
 	startTime := time.Now()
 	glog.V(4).Infof("Started syncing deployment %q (%v)", key, startTime)
@@ -657,6 +658,9 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 
 	// 修改了deployment的spec.paused字段 | 新增了spec.paused = true的deployment
 	// puase deployment | 修改pause = true 会走到此
+	// 场景:
+	// 1. 设置已经稳定的deployment paused为true
+	// 2. 设置正在更新的deployment paused为true
 	if d.Spec.Paused {
 		return dc.sync(d, rsList, podMap)
 	}

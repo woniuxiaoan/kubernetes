@@ -101,7 +101,11 @@ type customMetricsClient struct {
 
 // GetRawMetric gets the given metric (and an associated oldest timestamp)
 // for all pods matching the specified selector in the given namespace
+// res最后大体格式就是 res[podName] = metricNameValue
+// selector已经是scaleTargetRef对象所对应的selector，利用这个这个找到对应的pod
+//
 func (c *customMetricsClient) GetRawMetric(metricName string, namespace string, selector labels.Selector) (PodMetricsInfo, time.Time, error) {
+	// 它其实是调用了 /apis/custom.metrics.k8s.io/namespaces/{namespace}/pods/*/{metricName} 这个接口
 	metrics, err := c.client.NamespacedMetrics(namespace).GetForObjects(schema.GroupKind{Kind: "Pod"}, selector, metricName)
 	if err != nil {
 		return nil, time.Time{}, fmt.Errorf("unable to fetch metrics from custom metrics API: %v", err)

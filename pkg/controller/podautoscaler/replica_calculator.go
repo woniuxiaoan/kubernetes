@@ -179,17 +179,24 @@ func (c *ReplicaCalculator) GetRawResourceReplicas(currentReplicas int32, target
 // GetMetricReplicas calculates the desired replica count based on a target metric utilization
 // (as a milli-value) for pods matching the given selector in the given namespace, and the
 // current replica count
+// podMetric 类型会调用该方法获取对应的metric数据
+// targetUtilization即为设置的targetAverageValue的值
+// namespace为hpa所在的namespace
 func (c *ReplicaCalculator) GetMetricReplicas(currentReplicas int32, targetUtilization int64, metricName string, namespace string, selector labels.Selector) (replicaCount int32, utilization int64, timestamp time.Time, err error) {
 	metrics, timestamp, err := c.metricsClient.GetRawMetric(metricName, namespace, selector)
 	if err != nil {
 		return 0, 0, time.Time{}, fmt.Errorf("unable to get metric %s: %v", metricName, err)
 	}
 
+	// metrics是res[podName] = metricValue的map
 	replicaCount, utilization, err = c.calcPlainMetricReplicas(metrics, currentReplicas, targetUtilization, namespace, selector)
 	return replicaCount, utilization, timestamp, err
 }
 
 // calcPlainMetricReplicas calculates the desired replicas for plain (i.e. non-utilization percentage) metrics.
+// targetUtilization 即hpa里面设置的targetValue值
+// namespace: hpa所在的namespace
+// currentReplicas: 即scaleTargetRef 所设定对象的当前replicas
 func (c *ReplicaCalculator) calcPlainMetricReplicas(metrics metricsclient.PodMetricsInfo, currentReplicas int32, targetUtilization int64, namespace string, selector labels.Selector) (replicaCount int32, utilization int64, err error) {
 	podList, err := c.podsGetter.Pods(namespace).List(metav1.ListOptions{LabelSelector: selector.String()})
 	if err != nil {
@@ -204,6 +211,7 @@ func (c *ReplicaCalculator) calcPlainMetricReplicas(metrics metricsclient.PodMet
 	unreadyPods := sets.NewString()
 	missingPods := sets.NewString()
 
+	//将拿到的pod分为三类, readyPods, unreadyPods, missingPods
 	for _, pod := range podList.Items {
 		if pod.Status.Phase != v1.PodRunning || !podutil.IsPodReady(&pod) {
 			// save this pod name for later, but pretend it doesn't exist for now
@@ -225,11 +233,15 @@ func (c *ReplicaCalculator) calcPlainMetricReplicas(metrics metricsclient.PodMet
 		return 0, 0, fmt.Errorf("did not receive metrics for any ready pods")
 	}
 
+	//utilization为利用metrics数据测得的平均值，即 sum(metrisValue)/length(metrics)
+	//usageRatio即utilization/targetUtilization
 	usageRatio, utilization := metricsclient.GetMetricUtilizationRatio(metrics, targetUtilization)
 
 	rebalanceUnready := len(unreadyPods) > 0 && usageRatio > 1.0
 
+	//即没有unreadyPods且没有missingPods的话
 	if !rebalanceUnready && len(missingPods) == 0 {
+		// 如果介于usageRatio介于 [1-c.tolerance, 1+c.tolerance], 那么就不调整，维持原有replicas
 		if math.Abs(1.0-usageRatio) <= c.tolerance {
 			// return the current replicas if the change would be too small
 			return currentReplicas, utilization, nil
@@ -239,14 +251,19 @@ func (c *ReplicaCalculator) calcPlainMetricReplicas(metrics metricsclient.PodMet
 		return int32(math.Ceil(usageRatio * float64(readyPodCount))), utilization, nil
 	}
 
+	// 如果出现了missingPod，将采取保守策略，将metric中对应的metricValue置0 或者 置期望值(targetUtilization)
 	if len(missingPods) > 0 {
 		if usageRatio < 1.0 {
 			// on a scale-down, treat missing pods as using 100% of the resource request
+			// 需要减少实例的时候, 将missing pod的metricValue置targetUtilization
+			// 这样可以尽量减少需要scale-down的实例数
 			for podName := range missingPods {
 				metrics[podName] = targetUtilization
 			}
 		} else {
 			// on a scale-up, treat missing pods as using 0% of the resource request
+			// 当需要增多实例的时候, 将missing pod的metricValue置0
+			// 这样可以限制scale-up新增过多的实例数
 			for podName := range missingPods {
 				metrics[podName] = 0
 			}
