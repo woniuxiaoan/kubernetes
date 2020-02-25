@@ -473,7 +473,7 @@ func (f *DeltaFIFO) Pop(process PopProcessFunc) (interface{}, error) {
 		//当我们创建
 		err := process(item)
 
-		//如果处理出错，需要重新入队，则重新入队
+		//HandlerDelta处理出错, 返回重新入队错误的话，则重新入队
 		if e, ok := err.(ErrRequeue); ok {
 			f.addIfNotPresent(id, item)
 			err = e.Err

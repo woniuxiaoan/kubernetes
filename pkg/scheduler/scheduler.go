@@ -169,7 +169,9 @@ func NewFromConfig(config *Config) *Scheduler {
 }
 
 // Run begins watching and scheduling. It waits for cache to be synced, then starts a goroutine and returns immediately.
+// 调度的入口, 执行完这次立马开始下一次
 func (sched *Scheduler) Run() {
+	//等待podInformer缓存更新完毕, 即listAndWatch 将list存入 localStorage
 	if !sched.config.WaitForCacheSync() {
 		return
 	}
@@ -178,6 +180,7 @@ func (sched *Scheduler) Run() {
 		go sched.config.VolumeBinder.Run(sched.bindVolumesWorker, sched.config.StopEverything)
 	}
 
+	//调度完一个接着调度下一个
 	go wait.Until(sched.scheduleOne, 0, sched.config.StopEverything)
 }
 
@@ -187,13 +190,21 @@ func (sched *Scheduler) Config() *Config {
 }
 
 // schedule implements the scheduling algorithm and returns the suggested host.
+// 开始调度从PodQueue中拿到的Pod
+// 若调度失败, 在执行sched.config.Error(pod, err)时会将该Pod放入PodQueue的unschedulerQueue中
 func (sched *Scheduler) schedule(pod *v1.Pod) (string, error) {
 	host, err := sched.config.Algorithm.Schedule(pod, sched.config.NodeLister)
 	if err != nil {
 		glog.V(1).Infof("Failed to schedule pod: %v/%v", pod.Namespace, pod.Name)
 		pod = pod.DeepCopy()
+
+		//Error执行的是pkg/scheduler/factory/factory.go中的MakeDefaultErrorFunc
+		//结果是将Pod放入unschedulerQueue中
+		//除了svc的增删改, pvc的增改, node的增改会触发将unschedulerQueue中的所有pod移至activeQueue中外
 		sched.config.Error(pod, err)
 		sched.config.Recorder.Eventf(pod, v1.EventTypeWarning, "FailedScheduling", "%v", err)
+
+		//这个动作会触发watch的update event吗？
 		sched.config.PodConditionUpdater.Update(pod, &v1.PodCondition{
 			Type:    v1.PodScheduled,
 			Status:  v1.ConditionFalse,
@@ -379,6 +390,7 @@ func (sched *Scheduler) assume(assumed *v1.Pod, host string) error {
 		// This relies on the fact that Error will check if the pod has been bound
 		// to a node and if so will not add it back to the unscheduled pods queue
 		// (otherwise this would cause an infinite loop).
+		// 会触发将该Pod放入PopQueue的unschedulerQ中
 		sched.config.Error(assumed, err)
 		sched.config.Recorder.Eventf(assumed, v1.EventTypeWarning, "FailedScheduling", "AssumePod failed: %v", err)
 		sched.config.PodConditionUpdater.Update(assumed, &v1.PodCondition{
@@ -406,14 +418,20 @@ func (sched *Scheduler) bind(assumed *v1.Pod, b *v1.Binding) error {
 	// If binding succeeded then PodScheduled condition will be updated in apiserver so that
 	// it's atomic with setting host.
 	err := sched.config.GetBinder(assumed).Bind(b)
+
+	// 设定schedulerCache中对应pod的state bindingFinished = true, 标识已经成功绑定
 	if err := sched.config.SchedulerCache.FinishBinding(assumed); err != nil {
 		glog.Errorf("scheduler cache FinishBinding failed: %v", err)
 	}
+
+	// 如果实际绑定失败, 则从schedulerCache nodes，assumePods, poStates 移除该pod, 根据pod uid
 	if err != nil {
 		glog.V(1).Infof("Failed to bind pod: %v/%v", assumed.Namespace, assumed.Name)
+		//如果绑定失败, 则会从schedulerCache中移除该pod相关的信息
 		if err := sched.config.SchedulerCache.ForgetPod(assumed); err != nil {
 			glog.Errorf("scheduler cache ForgetPod failed: %v", err)
 		}
+		//将该pod放入PopQueue的unschedulerQ中, 等待重新调度
 		sched.config.Error(assumed, err)
 		sched.config.Recorder.Eventf(assumed, v1.EventTypeWarning, "FailedScheduling", "Binding rejected: %v", err)
 		sched.config.PodConditionUpdater.Update(assumed, &v1.PodCondition{
@@ -431,7 +449,12 @@ func (sched *Scheduler) bind(assumed *v1.Pod, b *v1.Binding) error {
 
 // scheduleOne does the entire scheduling workflow for a single pod.  It is serialized on the scheduling algorithm's host fitting.
 func (sched *Scheduler) scheduleOne() {
+	//NextPod方法会block住,直到有available Pod
+	//实际调用的是config.PodQueue.Pop()函数，PodQueue默认为优先级Queue
+	//此时即从activeQueue中拿出具有最大优先级的Pod
 	pod := sched.config.NextPod()
+
+	//如果该Pod DeletionTimestamp不是nil, 说明该Pod正在被删除, 无需调度
 	if pod.DeletionTimestamp != nil {
 		sched.config.Recorder.Eventf(pod, v1.EventTypeWarning, "FailedScheduling", "skip schedule deleting pod: %v/%v", pod.Namespace, pod.Name)
 		glog.V(3).Infof("Skip schedule deleting pod: %v/%v", pod.Namespace, pod.Name)
@@ -442,12 +465,16 @@ func (sched *Scheduler) scheduleOne() {
 
 	// Synchronously attempt to find a fit for the pod.
 	start := time.Now()
+
+	// 找到程序推荐的Host
 	suggestedHost, err := sched.schedule(pod)
 	if err != nil {
 		// schedule() may have failed because the pod would not fit on any host, so we try to
 		// preempt, with the expectation that the next time the pod is tried for scheduling it
 		// will fit due to the preemption. It is also possible that a different pod will schedule
 		// into the resources that were preempted, but this is harmless.
+
+		//如果调度失败的原因是FitError, 那么则开始进行抢占式调度, 待细化
 		if fitError, ok := err.(*core.FitError); ok {
 			preemptionStartTime := time.Now()
 			sched.preempt(pod, fitError)
@@ -459,6 +486,7 @@ func (sched *Scheduler) scheduleOne() {
 	metrics.SchedulingAlgorithmLatency.Observe(metrics.SinceInMicroseconds(start))
 	// Tell the cache to assume that a pod now is running on a given node, even though it hasn't been bound yet.
 	// This allows us to keep scheduling without waiting on binding to occur.
+	// 注意此时assumedPod.Spec.NodeName还是nil
 	assumedPod := pod.DeepCopy()
 
 	// Assume volumes first before assuming the pod.
@@ -472,16 +500,22 @@ func (sched *Scheduler) scheduleOne() {
 	// subsequent passes until all volumes are fully bound.
 	//
 	// This function modifies 'assumedPod' if volume binding is required.
+	// todo 待细化理解
 	err = sched.assumeAndBindVolumes(assumedPod, suggestedHost)
 	if err != nil {
 		return
 	}
 
 	// assume modifies `assumedPod` by setting NodeName=suggestedHost
+	// 架设该Pod已经bind到了suggestedHost上, 此时更新suggestedHost对应的nodes信息
+	// pod对应state的bindingFinished此时还是false, 因为绑定是异步进行的, 负责绑定的
+	// goroutine在绑定成功后才会将其设为true
 	err = sched.assume(assumedPod, suggestedHost)
 	if err != nil {
 		return
 	}
+
+	// 然后异步绑定该pod至指定node上
 	// bind the pod to its host asynchronously (we can do this b/c of the assumption step above).
 	go func() {
 		err := sched.bind(assumedPod, &v1.Binding{

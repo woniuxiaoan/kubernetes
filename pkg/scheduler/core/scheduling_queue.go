@@ -226,6 +226,9 @@ func (p *PriorityQueue) updateNominatedPod(oldPod, newPod *v1.Pod) {
 
 // Add adds a pod to the active queue. It should be called only when a new pod
 // is added so there is no chance the pod is already in either queue.
+// 当发现有unassigned Pods Add时，addPodToSchedulingQueue负责把该pods加入到activeQ中
+// 并确保unSchedulableQ中没有这些unassigned pods。
+// unassigned Pod即: len(nodeName) == 0 && status.succeed != true && status.failed != true
 func (p *PriorityQueue) Add(pod *v1.Pod) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -330,6 +333,8 @@ func isPodUpdated(oldPod, newPod *v1.Pod) bool {
 // Update updates a pod in the active queue if present. Otherwise, it removes
 // the item from the unschedulable queue and adds the updated one to the active
 // queue.
+
+
 func (p *PriorityQueue) Update(oldPod, newPod *v1.Pod) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()

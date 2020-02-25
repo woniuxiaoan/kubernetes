@@ -161,6 +161,7 @@ func NewConfigFactory(
 		storageClassLister = storageClassInformer.Lister()
 	}
 
+	//scheduler kernal struct
 	c := &configFactory{
 		client:                         client,
 		podLister:                      schedulerCache,
@@ -181,7 +182,8 @@ func NewConfigFactory(
 	}
 
 	c.scheduledPodsHasSynced = podInformer.Informer().HasSynced
-	// scheduled pod cache
+
+	// scheduled pod cache, 用来存储已经调度的Pod
 	podInformer.Informer().AddEventHandler(
 		cache.FilteringResourceEventHandler{
 			FilterFunc: func(obj interface{}) bool {
@@ -225,6 +227,7 @@ func NewConfigFactory(
 				}
 			},
 			Handler: cache.ResourceEventHandlerFuncs{
+				// 将Pod放入activeQ队列中, 并确保unshedulerQueue中没有该Pod
 				AddFunc:    c.addPodToSchedulingQueue,
 				UpdateFunc: c.updatePodInSchedulingQueue,
 				DeleteFunc: c.deletePodFromSchedulingQueue,
@@ -235,6 +238,12 @@ func NewConfigFactory(
 	// they may need to call.
 	c.scheduledPodLister = assignedPodLister{podInformer.Lister()}
 
+
+	// node的add/update会触发MoveAllToActiveQueue, 即将所有的unschedulerPod移入activePod
+	// 意味着集群中增加、更新node时，所有未成功调度的pods都会重新在activeQ中按优先级进行重新排序等待调度。
+	// 如果集群中出现频繁Add/Update node的动作，会导致频繁将unSchedulableQ中的所有Pods移到activeQ中。
+	// 如果unSchedulableQ中有个High Priority的Pod，那么就会导致频繁的抢占Lower Priority Pods的调度机会，
+	// 使得Lower Priority Pod长期处于饥饿状态。
 	nodeInformer.Informer().AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc:    c.addNodeToCache,
@@ -266,6 +275,11 @@ func NewConfigFactory(
 	c.pVLister = pvInformer.Lister()
 
 	// This is for MaxPDVolumeCountPredicate: add/delete PVC will affect counts of PV when it is bound.
+	// pvc的add/update会触发MoveAllToActiveQueue, 即将所有的unschedulerPod移入activePod
+	// 意味着集群中增加、更新pvc时，所有未成功调度的pods都会重新在activeQ中按优先级进行重新排序等待调度。
+	// 如果集群中出现频繁Add/Update pvc的动作，会导致频繁将unSchedulableQ中的所有Pods移到activeQ中。
+	// 如果unSchedulableQ中有个High Priority的Pod，那么就会导致频繁的抢占Lower Priority Pods的调度机会，
+	// 使得Lower Priority Pod长期处于饥饿状态。
 	pvcInformer.Informer().AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc:    c.onPvcAdd,
@@ -278,6 +292,11 @@ func NewConfigFactory(
 	// This is for ServiceAffinity: affected by the selector of the service is updated.
 	// Also, if new service is added, equivalence cache will also become invalid since
 	// existing pods may be "captured" by this service and change this predicate result.
+	// server的add/update/delete都会触发MoveAllToActiveQueue, 即将所有的unschedulerPod移入activePod
+	// 意味着集群中增加、更新或者删除Service时，所有未成功调度的pods都会重新在activeQ中按优先级进行重新排序等待调度。
+	// 如果集群中出现频繁Add/Update/Delete Service的动作，会导致频繁将unSchedulableQ中的所有Pods移到activeQ中。
+	// 如果unSchedulableQ中有个High Priority的Pod，那么就会导致频繁的抢占Lower Priority Pods的调度机会，
+	// 使得Lower Priority Pod长期处于饥饿状态。
 	serviceInformer.Informer().AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc:    c.onServiceAdd,
@@ -604,6 +623,9 @@ func (c *configFactory) addPodToCache(obj interface{}) {
 		glog.Errorf("scheduler cache AddPod failed: %v", err)
 	}
 
+	//有些Pod可能因为设定了PodAffinity, 从而不能被顺利调度而被放入unschedulableQ队列中
+	//AssignedPodAdded的目的就是从unschedulableQ中找出那些依稀与该Pod的pods,
+	//放入activeQ中等待调度.
 	c.podQueue.AssignedPodAdded(pod)
 
 	// NOTE: Updating equivalence cache of addPodToCache has been
@@ -627,6 +649,8 @@ func (c *configFactory) updatePodInCache(oldObj, newObj interface{}) {
 	}
 
 	c.invalidateCachedPredicatesOnUpdatePod(newPod, oldPod)
+	//pod更新后可能满足了某些设定的podAffinity的运行条件
+	//该函数就是从unscheduleableQ中找出这些pods, 放入activeQ中重新调度
 	c.podQueue.AssignedPodUpdated(newPod)
 }
 
@@ -636,11 +660,21 @@ func (c *configFactory) addPodToSchedulingQueue(obj interface{}) {
 	}
 }
 
+//当下面两种情况, skipPodUpdate返回true, 即忽略此次更新事件
+//1. 该pod已经Assumed：检查scheduler cache中assumePods中是否包含该pod，如果包含，说明它已经Assumed
+// （当pod完成了scheduler的Predicate和Priority后，立刻就设置为Assumed，之后再调用apiserver的Bind接口）
+//2. 该pod update只更新了它的ResourceVersion, Spec.NodeName, Annotations三者之一或者全部。
 func (c *configFactory) updatePodInSchedulingQueue(oldObj, newObj interface{}) {
 	pod := newObj.(*v1.Pod)
 	if c.skipPodUpdate(pod) {
 		return
 	}
+
+	// 如果该Pod存在于activeQ中则更新该Pod
+	// 如果该Pod存在于unschedulerQ中, 那么进一步判断
+	//     如果该Pod更新了除去ResourceVersion/Generation/Status之外的内容, 则从unschedulerQ中移除, 然后将new Pod 放入activeQ等待调度
+	// 	   否则只更新unschedulerQ中的Pod
+	// 如果该Pod也不存在于unschedulerQ中, 那么则添加入activeQ中等待调度
 	if err := c.podQueue.Update(oldObj.(*v1.Pod), pod); err != nil {
 		runtime.HandleError(fmt.Errorf("unable to update %T: %v", newObj, err))
 	}
@@ -713,6 +747,8 @@ func (c *configFactory) deletePodFromCache(obj interface{}) {
 	}
 
 	c.invalidateCachedPredicatesOnDeletePod(pod)
+	//删除Pod会涉及资源变动, 此时某些因为资源受限的pods可能就满足了调度条件
+	//所以将unschedulableQ中所有的pods移入activeQ等待调度
 	c.podQueue.MoveAllToActiveQueue()
 }
 
@@ -748,6 +784,7 @@ func (c *configFactory) addNodeToCache(obj interface{}) {
 		glog.Errorf("scheduler cache AddNode failed: %v", err)
 	}
 
+	// fifo Queue do nothing
 	c.podQueue.MoveAllToActiveQueue()
 	// NOTE: add a new node does not affect existing predicates in equivalence cache
 }
@@ -938,6 +975,8 @@ func (c *configFactory) CreateFromConfig(policy schedulerapi.Policy) (*scheduler
 	}
 
 	predicateKeys := sets.NewString()
+
+	//
 	if policy.Predicates == nil {
 		glog.V(2).Infof("Using predicates from algorithm provider '%v'", DefaultProvider)
 		provider, err := GetAlgorithmProvider(DefaultProvider)
@@ -996,6 +1035,7 @@ func (c *configFactory) CreateFromConfig(policy schedulerapi.Policy) (*scheduler
 		c.alwaysCheckAllPredicates = policy.AlwaysCheckAllPredicates
 	}
 
+	//
 	return c.CreateFromKeys(predicateKeys, priorityKeys, extenders)
 }
 
@@ -1060,6 +1100,9 @@ func (c *configFactory) CreateFromKeys(predicateKeys, priorityKeys sets.String, 
 	algo := core.NewGenericScheduler(c.schedulerCache, c.equivalencePodCache, c.podQueue, predicateFuncs, predicateMetaProducer, priorityConfigs, priorityMetaProducer, extenders, c.volumeBinder, c.pVCLister, c.alwaysCheckAllPredicates)
 
 	podBackoff := util.CreateDefaultPodBackoff()
+
+	//核心数据结构, 里面包含了调度所需的各种数据结构
+	//scheduler kernal struct
 	return &scheduler.Config{
 		SchedulerCache: c.schedulerCache,
 		Ecache:         c.equivalencePodCache,
@@ -1072,6 +1115,7 @@ func (c *configFactory) CreateFromKeys(predicateKeys, priorityKeys sets.String, 
 		WaitForCacheSync: func() bool {
 			return cache.WaitForCacheSync(c.StopEverything, c.scheduledPodsHasSynced)
 		},
+		//即c.podQueue.Pop()
 		NextPod: func() *v1.Pod {
 			return c.getNextPod()
 		},

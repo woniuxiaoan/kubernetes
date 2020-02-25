@@ -139,7 +139,7 @@ func (g *genericScheduler) Schedule(pod *v1.Pod, nodeLister algorithm.NodeLister
 	startPredicateEvalTime := time.Now()
 
 	//预选
-	//g.schedulerQueue即待调度PodQueue，todo： 这些pod是什么被塞进去的？
+	//g.schedulerQueue即待调度PodQueue
 	//默认用的是PriorityQueue, filteredNodes为筛选出来的nodes.
 	filteredNodes, failedPredicateMap, err := findNodesThatFit(pod, g.cachedNodeInfoMap, nodes, g.predicates, g.extenders, g.predicateMetaProducer, g.equivalenceCache, g.schedulingQueue, g.alwaysCheckAllPredicates)
 	if err != nil {

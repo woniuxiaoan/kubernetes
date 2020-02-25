@@ -163,6 +163,7 @@ func (o *Options) Complete() error {
 		glog.Warning("WARNING: all flags other than --config are deprecated. Please begin using a config file ASAP.")
 		o.applyDeprecatedHealthzAddressToConfig()
 		o.applyDeprecatedHealthzPortToConfig()
+		// 设定o.config.algorithmResource
 		o.applyDeprecatedAlgorithmSourceOptionsToConfig()
 	}
 
@@ -349,6 +350,8 @@ through the API as necessary.`,
 		glog.Fatalf("unable to apply config defaults: %v", err)
 	}
 
+	// AddFlags作用就是将opts自己的一些参数与指定flag绑定起来, 方便通过命令行赋值
+	// 如果命令行没有赋值, 则使用默认值(第三个参数)
 	opts.AddFlags(cmd.Flags())
 	cmd.MarkFlagFilename("config", "yaml", "yml", "json")
 
@@ -636,6 +639,31 @@ func (s *SchedulerServer) SchedulerConfig() (*scheduler.Config, error) {
 	}
 
 	// Set up the configurator which can create schedulers from configs.
+	/*
+	configurator := &configFactory{
+			client:                         s.Client,
+			podLister:                      schedulercache.New(30*time.Second, stopEverything),
+			podQueue:                       core.NewSchedulingQueue(),
+			pVLister:                       s.InformerFactory.Core().V1().PersistentVolumes().Lister(),
+			pVCLister:                      s.InformerFactory.Core().V1().PersistentVolumeClaims().Lister(),
+			serviceLister:                  s.InformerFactory.Core().V1().Services().Lister(),
+			controllerLister:               s.InformerFactory.Core().V1().ReplicationControllers().Lister(),
+			replicaSetLister:               s.InformerFactory.Extensions().V1beta1().ReplicaSets().Lister(),
+			statefulSetLister:              s.InformerFactory.Apps().V1beta1().StatefulSets().Lister(),
+			pdbLister:                      s.InformerFactory.Policy().V1beta1().PodDisruptionBudgets().Lister(),
+			storageClassLister:             storageClassLister,
+			schedulerCache:                 和podLister同一个cache,
+			StopEverything:                 stopEverything,
+			schedulerName:                  s.SchedulerName,
+			hardPodAffinitySymmetricWeight: s.HardPodAffinitySymmetricWeight,
+			enableEquivalenceClassCache:    enableEquivalenceClassCache,
+			nodeLister: s.InformerFactory.Core().V1().Nodes().Lister(),
+			scheduledPodLister: assignedPodLister{s.PodInformer.Lister()},
+			volumeBinder = volumebinder.NewVolumeBinder(s.Client, s.InformerFactory.Core().V1().PersistentVolumeClaims(), s.InformerFactory.Core().V1().PersistentVolumes(), storageClassInformer)
+		}
+	*/
+
+	//scheduler kernal struct
 	configurator := factory.NewConfigFactory(
 		s.SchedulerName,
 		s.Client,

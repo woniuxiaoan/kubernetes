@@ -422,7 +422,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	containerGCPolicy := kubecontainer.ContainerGCPolicy{
 		MinAge:             minimumGCAge.Duration,
 		MaxPerPodContainer: int(maxPerPodContainerCount), //每个容器所能拥有的最多dead container个数
-		MaxContainers:      int(maxContainerCount), //该节点最多的dead container个数
+		MaxContainers:      int(maxContainerCount),       //该节点最多的dead container个数
 	}
 
 	daemonEndpoints := &v1.NodeDaemonEndpoints{
@@ -1465,6 +1465,7 @@ func (kl *Kubelet) GetKubeClient() clientset.Interface {
 // This operation writes all events that are dispatched in order to provide
 // the most accurate information possible about an error situation to aid debugging.
 // Callers should not throw an event if this operation returns an error.
+// 该函数是监听到变动的Pod的对应handher, 之前应该还有事件封装, 以便生成syncPodOptions
 func (kl *Kubelet) syncPod(o syncPodOptions) error {
 	// pull out the required options
 	pod := o.pod

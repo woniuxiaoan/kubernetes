@@ -80,6 +80,11 @@ func newSchedulerCache(ttl, period time.Duration, stop <-chan struct{}) *schedul
 	}
 }
 
+// 以cache里面的nodes为基础, 添加/更新/删除 nodeNameToInfo里面的信息
+// node里面包含了很多数据，
+// 1. 该node的资源情况
+// 2. 该node上的所有的pods
+// 3. 该node上包含affinity的pods
 func (cache *schedulerCache) UpdateNodeNameToInfoMap(nodeNameToInfo map[string]*NodeInfo) error {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
@@ -101,6 +106,7 @@ func (cache *schedulerCache) List(selector labels.Selector) ([]*v1.Pod, error) {
 	return cache.FilteredList(alwaysTrue, selector)
 }
 
+//从scheduler里面所有nodes中筛选出来满足selector的pods, 并返回
 func (cache *schedulerCache) FilteredList(podFilter PodFilter, selector labels.Selector) ([]*v1.Pod, error) {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
@@ -123,6 +129,7 @@ func (cache *schedulerCache) FilteredList(podFilter PodFilter, selector labels.S
 }
 
 func (cache *schedulerCache) AssumePod(pod *v1.Pod) error {
+	// 获取pod的uid
 	key, err := getPodKey(pod)
 	if err != nil {
 		return err
@@ -134,6 +141,7 @@ func (cache *schedulerCache) AssumePod(pod *v1.Pod) error {
 		return fmt.Errorf("pod %v is in the cache, so can't be assumed", key)
 	}
 
+	// 将Pod加入的
 	cache.addPod(pod)
 	ps := &podState{
 		pod: pod,
@@ -197,12 +205,15 @@ func (cache *schedulerCache) ForgetPod(pod *v1.Pod) error {
 }
 
 // Assumes that lock is already acquired.
+// schedulerCache用来存储已经调度的Pod
+// 从该pod中找到spec.nodeName, 如果没有找到该节点, 则新建一个node
 func (cache *schedulerCache) addPod(pod *v1.Pod) {
 	n, ok := cache.nodes[pod.Spec.NodeName]
 	if !ok {
 		n = NewNodeInfo()
 		cache.nodes[pod.Spec.NodeName] = n
 	}
+	//将pod添加至该node的pods里面
 	n.AddPod(pod)
 }
 

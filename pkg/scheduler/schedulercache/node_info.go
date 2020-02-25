@@ -315,6 +315,8 @@ func hasPodAffinityConstraints(pod *v1.Pod) bool {
 }
 
 // AddPod adds pod information to this NodeInfo.
+// 更新该node所包含的pods, pod request的总资源, 所用总端口数等。
+// 该信息存储在schedulerCache中
 func (n *NodeInfo) AddPod(pod *v1.Pod) {
 	res, non0CPU, non0Mem := calculateResource(pod)
 	n.requestedResource.MilliCPU += res.MilliCPU
