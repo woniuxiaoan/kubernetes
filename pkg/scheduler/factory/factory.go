@@ -153,6 +153,8 @@ func NewConfigFactory(
 	enableEquivalenceClassCache bool,
 ) scheduler.Configurator {
 	stopEverything := make(chan struct{})
+	//30*time.Seconds将来会设置为schedulercache.podStats[x].deadline
+	//起始时间为finishBinding执行的时间
 	schedulerCache := schedulercache.New(30*time.Second, stopEverything)
 
 	// storageClassInformer is only enabled through VolumeScheduling feature gate
@@ -202,6 +204,8 @@ func NewConfigFactory(
 				}
 			},
 			Handler: cache.ResourceEventHandlerFuncs{
+				// 已经调度好了的pod触发AddFunc handler时, 会将该Pod从assumePods删除(存在的话)
+				// 并将添加/修改podStats中的自己，使其deadline为空。并将自己添加进对应的node信息中
 				AddFunc:    c.addPodToCache,
 				UpdateFunc: c.updatePodInCache,
 				DeleteFunc: c.deletePodFromCache,
@@ -655,13 +659,14 @@ func (c *configFactory) updatePodInCache(oldObj, newObj interface{}) {
 }
 
 func (c *configFactory) addPodToSchedulingQueue(obj interface{}) {
+	//添加进activeQ, 并确保unschedulerQ没有该pod, 有则删除
 	if err := c.podQueue.Add(obj.(*v1.Pod)); err != nil {
 		runtime.HandleError(fmt.Errorf("unable to queue %T: %v", obj, err))
 	}
 }
 
 //当下面两种情况, skipPodUpdate返回true, 即忽略此次更新事件
-//1. 该pod已经Assumed：检查scheduler cache中assumePods中是否包含该pod，如果包含，说明它已经Assumed
+//1. 该pod已经Assumed：检查schedulerCache中assumePods中是否包含该pod，如果包含，说明它已经Assumed
 // （当pod完成了scheduler的Predicate和Priority后，立刻就设置为Assumed，之后再调用apiserver的Bind接口）
 //2. 该pod update只更新了它的ResourceVersion, Spec.NodeName, Annotations三者之一或者全部。
 func (c *configFactory) updatePodInSchedulingQueue(oldObj, newObj interface{}) {
@@ -1097,6 +1102,9 @@ func (c *configFactory) CreateFromKeys(predicateKeys, priorityKeys sets.String, 
 		glog.Info("Created equivalence class cache")
 	}
 
+	//用schedulerCache, podQueue，预选， 优选函数初始化了一个generic_scheduler
+	//predicateFuncs为预选函数
+	//priorityConfigs为优选函数
 	algo := core.NewGenericScheduler(c.schedulerCache, c.equivalencePodCache, c.podQueue, predicateFuncs, predicateMetaProducer, priorityConfigs, priorityMetaProducer, extenders, c.volumeBinder, c.pVCLister, c.alwaysCheckAllPredicates)
 
 	podBackoff := util.CreateDefaultPodBackoff()
@@ -1108,7 +1116,7 @@ func (c *configFactory) CreateFromKeys(predicateKeys, priorityKeys sets.String, 
 		Ecache:         c.equivalencePodCache,
 		// The scheduler only needs to consider schedulable nodes.
 		NodeLister:          &nodeLister{c.nodeLister},
-		Algorithm:           algo,
+		Algorithm:           algo, //
 		GetBinder:           c.getBinderFunc(extenders),
 		PodConditionUpdater: &podConditionUpdater{c.client},
 		PodPreemptor:        &podPreemptor{c.client},

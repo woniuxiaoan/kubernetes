@@ -130,6 +130,10 @@ func (g *genericScheduler) Schedule(pod *v1.Pod, nodeLister algorithm.NodeLister
 	}
 
 	// Used for all fit and priority funcs.
+	// 调度前的准备工作, 将schedulerCache的内容更新至cacheNodeInfoMap中
+	// 不是全量更新, 只更新map没有, 或者map中的generation 与 schedulerCache中generation不同的
+	// 向schedulerCache.nodes的node中添加/删除pod时都会引起该generation的变更
+	// 每次调度过程只会在开始调度/开始驱逐的最开始进行更新
 	err = g.cache.UpdateNodeNameToInfoMap(g.cachedNodeInfoMap)
 	if err != nil {
 		return "", err
@@ -141,6 +145,7 @@ func (g *genericScheduler) Schedule(pod *v1.Pod, nodeLister algorithm.NodeLister
 	//预选
 	//g.schedulerQueue即待调度PodQueue
 	//默认用的是PriorityQueue, filteredNodes为筛选出来的nodes.
+	//g.predicates为系统默认的预选函数
 	filteredNodes, failedPredicateMap, err := findNodesThatFit(pod, g.cachedNodeInfoMap, nodes, g.predicates, g.extenders, g.predicateMetaProducer, g.equivalenceCache, g.schedulingQueue, g.alwaysCheckAllPredicates)
 	if err != nil {
 		return "", err
@@ -224,18 +229,23 @@ func (g *genericScheduler) selectHost(priorityList schedulerapi.HostPriorityList
 func (g *genericScheduler) Preempt(pod *v1.Pod, nodeLister algorithm.NodeLister, scheduleErr error) (*v1.Node, []*v1.Pod, []*v1.Pod, error) {
 	// Scheduler may return various types of errors. Consider preemption only if
 	// the error is of type FitError.
+	// 只有此次调度失败的Pod返回的错误是FItError时, 才开始抢占逻辑, 别的错误不进行抢占
 	fitError, ok := scheduleErr.(*FitError)
 	if !ok || fitError == nil {
 		return nil, nil, nil, nil
 	}
+
+	// 更新schedulerCache.nodes的信息至cachedNodeInfoMap
 	err := g.cache.UpdateNodeNameToInfoMap(g.cachedNodeInfoMap)
 	if err != nil {
 		return nil, nil, nil, err
 	}
+
 	if !podEligibleToPreemptOthers(pod, g.cachedNodeInfoMap) {
 		glog.V(5).Infof("Pod %v is not eligible for more preemption.", pod.Name)
 		return nil, nil, nil, nil
 	}
+
 	allNodes, err := nodeLister.List()
 	if err != nil {
 		return nil, nil, nil, err
@@ -253,6 +263,8 @@ func (g *genericScheduler) Preempt(pod *v1.Pod, nodeLister algorithm.NodeLister,
 	if err != nil {
 		return nil, nil, nil, err
 	}
+
+	//从潜在的
 	nodeToVictims, err := selectNodesForPreemption(pod, g.cachedNodeInfoMap, potentialNodes, g.predicates, g.predicateMetaProducer, g.schedulingQueue, pdbs)
 	if err != nil {
 		return nil, nil, nil, err
@@ -357,9 +369,9 @@ func findNodesThatFit(
 				pod,
 				meta,
 				nodeNameToInfo[nodeName],
-				predicateFuncs,
+				predicateFuncs, //这些为预选函数
 				ecache,
-				schedulingQueue,
+				schedulingQueue, //缓存
 				alwaysCheckAllPredicates,
 				equivCacheInfo,
 			)
@@ -389,6 +401,7 @@ func findNodesThatFit(
 		}
 	}
 
+	//extenders为用户扩张, 如果用户想在默认拿到的调度结果上再次进行判断, 就可以通过设定extenders来进行扩展
 	if len(filtered) > 0 && len(extenders) != 0 {
 		for _, extender := range extenders {
 			if !extender.IsInterested(pod) {
@@ -1056,6 +1069,7 @@ func selectVictimsOnNode(
 
 // nodesWherePreemptionMightHelp returns a list of nodes with failed predicates
 // that may be satisfied by removing pods from the node.
+// failedPredicatedMap存储了每个node不适合该pod调度的原因, key为nodename
 func nodesWherePreemptionMightHelp(pod *v1.Pod, nodes []*v1.Node, failedPredicatesMap FailedPredicateMap) []*v1.Node {
 	potentialNodes := []*v1.Node{}
 	for _, node := range nodes {

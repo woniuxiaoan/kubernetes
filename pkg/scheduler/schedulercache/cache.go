@@ -45,8 +45,8 @@ func New(ttl time.Duration, stop <-chan struct{}) Cache {
 
 type schedulerCache struct {
 	stop   <-chan struct{}
-	ttl    time.Duration
-	period time.Duration
+	ttl    time.Duration  //podStates中设定的deadline, 默认30s
+	period time.Duration  //从assumePods， podStates, nodes中清理过期pod的周期, 默认1s
 
 	// This mutex guards all fields within this cache struct.
 	mu sync.Mutex
@@ -80,7 +80,7 @@ func newSchedulerCache(ttl, period time.Duration, stop <-chan struct{}) *schedul
 	}
 }
 
-// 以cache里面的nodes为基础, 添加/更新/删除 nodeNameToInfo里面的信息
+// 以schedulerCache里面的nodes为基础, 添加/更新/删除 nodeNameToInfo里面的信息
 // node里面包含了很多数据，
 // 1. 该node的资源情况
 // 2. 该node上的所有的pods
@@ -167,6 +167,7 @@ func (cache *schedulerCache) finishBinding(pod *v1.Pod, now time.Time) error {
 
 	glog.V(5).Infof("Finished binding for pod %v. Can be expired.", key)
 	currState, ok := cache.podStates[key]
+	//finishBinding操作会设定podStats的deadline为ttl
 	if ok && cache.assumedPods[key] {
 		dl := now.Add(cache.ttl)
 		currState.bindingFinished = true
@@ -446,6 +447,7 @@ func (cache *schedulerCache) cleanupExpiredAssumedPods() {
 }
 
 // cleanupAssumedPods exists for making test deterministic by taking time as input argument.
+// 这个只是针对assumePods中的pods及对应的podStats的
 func (cache *schedulerCache) cleanupAssumedPods(now time.Time) {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
@@ -456,11 +458,18 @@ func (cache *schedulerCache) cleanupAssumedPods(now time.Time) {
 		if !ok {
 			panic("Key found in assumed set but not in podStates. Potentially a logical error.")
 		}
+
+		//处于assumedPods的pods, 若对应bindingFinished为false, 则说明还在绑定过程中, 此时清理assumedPods不能清除该pod
+		//已经调度好的pod触发的Add event handler添加进schedulerCache时是会清理掉assumePods中的自己的
 		if !ps.bindingFinished {
 			glog.V(3).Infof("Couldn't expire cache for pod %v/%v. Binding is still in progress.",
 				ps.pod.Namespace, ps.pod.Name)
 			continue
 		}
+
+		//时间已经超时, 则从assumedPods, podStates中移除相关的pod
+		//同时从nodes中移除pod, 并释放掉对应node的资源
+		//???从node中清除掉已经占用的资源不会影响调度吗???
 		if now.After(*ps.deadline) {
 			glog.Warningf("Pod %s/%s expired", ps.pod.Namespace, ps.pod.Name)
 			if err := cache.expirePod(key, ps); err != nil {
