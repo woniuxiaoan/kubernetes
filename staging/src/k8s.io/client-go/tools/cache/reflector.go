@@ -273,6 +273,7 @@ func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
 	}
 	r.metrics.numberOfItemsInList.Observe(float64(len(items)))
 	// 调用deltaFifo的replace，将全量数据写入deltaFIFO中
+	// 同时针对如果index中有, 全量数据中没有的数据向deltaFIFO中发送一个删除事件
 	if err := r.syncWith(items, resourceVersion); err != nil {
 		return fmt.Errorf("%s: Unable to sync list result: %v", r.name, err)
 	}
@@ -307,6 +308,7 @@ func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
 	}()
 
 	//前面是reflector启动时的全量数据同步（list），下面是watch的部分
+	//注意监听的revision是从全量获取的revision开始的, 所以监听到的数据都是最新变动的数据
 	for {
 		// give the stopCh a chance to stop the loop, even in case of continue statements further down on errors
 		select {
