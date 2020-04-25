@@ -357,7 +357,7 @@ func (s *sharedIndexInformer) HandleDeltas(obj interface{}) error {
 			isSync := d.Type == Sync
 			s.cacheMutationDetector.AddObject(d.Object)
 			//如果是Sync、add、update action， localstore没有找到该delta对象，则添加值localstore，否则则更新本地localstore。
-			//然后通知处理器处理事件
+			//localstore存在，则发布update event给handler. 否则发布add event。
 			if old, exists, err := s.indexer.Get(d.Object); err == nil && exists {
 				if err := s.indexer.Update(d.Object); err != nil {
 					return err
