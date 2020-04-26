@@ -643,7 +643,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 				remoteImageEndpoint)
 			glog.V(2).Infof("Starting the GRPC server for the docker CRI shim.")
 
-			//如果runtime为docker，则起一个dockershim grpc server(cni的实现)
+			//如果runtime为docker，则起一个dockershim grpc server(cri的实现)
 			server := dockerremote.NewDockerServer(remoteRuntimeEndpoint, ds)
 
 			//启动dockershim grpc server
