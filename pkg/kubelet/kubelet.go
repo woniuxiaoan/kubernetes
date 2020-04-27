@@ -159,8 +159,10 @@ const (
 	backOffPeriod = time.Second * 10
 
 	// ContainerGCPeriod is the period for performing container garbage collection.
+	// 每分钟kubelet会进行一次containerGC
 	ContainerGCPeriod = time.Minute
 	// ImageGCPeriod is the period for performing image garbage collection.
+	// 每5分钟kubelet会进行一次imageGC
 	ImageGCPeriod = 5 * time.Minute
 
 	// Minimum number of dead containers to keep in a pod
@@ -1271,8 +1273,12 @@ func (kl *Kubelet) setupDataDirs() error {
 
 // StartGarbageCollection starts garbage collection threads.
 // 开启垃圾回收
+// 每分钟进行一次containerGC
+// 每5分钟进行一次imageGC
 func (kl *Kubelet) StartGarbageCollection() {
 	loggedContainerGCFailure := false
+
+	// containerGC逻辑
 	go wait.Until(func() {
 		if err := kl.containerGC.GarbageCollect(); err != nil {
 			glog.Errorf("Container garbage collection failed: %v", err)
@@ -1290,6 +1296,7 @@ func (kl *Kubelet) StartGarbageCollection() {
 	}, ContainerGCPeriod, wait.NeverStop)
 
 	prevImageGCFailed := false
+	// imageGC逻辑
 	go wait.Until(func() {
 		if err := kl.imageManager.GarbageCollect(); err != nil {
 			if prevImageGCFailed {

@@ -161,6 +161,7 @@ func (cgc *containerGC) removeSandbox(sandboxID string) {
 // evictableContainers gets all containers that are evictable. Evictable containers are: not running
 // and created more than MinAge ago.
 // 找到该节点上状态！= running且创建时间大于MinAge的容器
+// 搜集MinAge之前创建的且 not running的容器
 func (cgc *containerGC) evictableContainers(minAge time.Duration) (containersByEvictUnit, error) {
 	containers, err := cgc.manager.getKubeletContainers(true)
 	if err != nil {
@@ -333,6 +334,8 @@ func (cgc *containerGC) evictSandboxes(evictTerminatedPods bool) error {
 
 // evictPodLogsDirectories evicts all evictable pod logs directories. Pod logs directories
 // are evictable if there are no corresponding pods.
+// 如果该Pod已经被删除,则删除/var/log/pods下对应文件夹下的所有文件
+// pods下的目录名称都是pod的uid
 func (cgc *containerGC) evictPodLogsDirectories(allSourcesReady bool) error {
 	osInterface := cgc.manager.osInterface
 	if allSourcesReady {
@@ -381,11 +384,13 @@ func (cgc *containerGC) evictPodLogsDirectories(allSourcesReady bool) error {
 // * removes evictable sandboxes.
 func (cgc *containerGC) GarbageCollect(gcPolicy kubecontainer.ContainerGCPolicy, allSourcesReady bool, evictTerminatedPods bool) error {
 	// Remove evictable containers
+	// 按照设定的标准, 清除Pod中每个container的超额容器
 	if err := cgc.evictContainers(gcPolicy, allSourcesReady, evictTerminatedPods); err != nil {
 		return err
 	}
 
 	// Remove sandboxes with zero containers
+	// 删除已经没有容器的sandbox, 或者 sandbox对应Pod已经不存在
 	if err := cgc.evictSandboxes(evictTerminatedPods); err != nil {
 		return err
 	}
