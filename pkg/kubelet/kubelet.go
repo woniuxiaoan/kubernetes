@@ -305,6 +305,7 @@ func makePodSourceConfig(kubeCfg *kubeletconfiginternal.KubeletConfiguration, ku
 		if updatechannel == nil {
 			updatechannel = cfg.Channel(kubetypes.ApiserverSource)
 		}
+		// updateChannel里面承载了所有的变动Pod, 最终该channel会在syncLoop中被消费
 		config.NewSourceApiserver(kubeDeps.KubeClient, nodeName, updatechannel)
 	}
 	return cfg, nil
