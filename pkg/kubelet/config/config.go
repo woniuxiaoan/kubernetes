@@ -243,6 +243,8 @@ func (s *podStorage) merge(source string, change interface{}) (adds, updates, de
 	// updatePodFunc is the local function which updates the pod cache *oldPods* with new pods *newPods*.
 	// After updated, new pod will be stored in the pod cache *pods*.
 	// Notice that *pods* and *oldPods* could be the same cache.
+	// kubelet最开始启动时, oldPods为空, 此时list apiserver拿到的所有的pods都会被更新至s.pods中
+	// 同时被放置在addPods中.
 	updatePodsFunc := func(newPods []*v1.Pod, oldPods, pods map[types.UID]*v1.Pod) {
 		filtered := filterInvalidPods(newPods, source, s.recorder)
 		for _, ref := range filtered {
@@ -251,8 +253,10 @@ func (s *podStorage) merge(source string, change interface{}) (adds, updates, de
 				ref.Annotations = make(map[string]string)
 			}
 			ref.Annotations[kubetypes.ConfigSourceAnnotationKey] = source
+			// 如果channel中传来的pod可以在podStorage中找到
 			if existing, found := oldPods[ref.UID]; found {
 				pods[ref.UID] = existing
+				//判断需要对该Pod做什么操作
 				needUpdate, needReconcile, needGracefulDelete := checkAndUpdatePod(existing, ref)
 				if needUpdate {
 					updatePods = append(updatePods, existing)
@@ -261,9 +265,13 @@ func (s *podStorage) merge(source string, change interface{}) (adds, updates, de
 				} else if needGracefulDelete {
 					deletePods = append(deletePods, existing)
 				}
+				// 所有有可能稳定的Pod没有任何变化， 此时该Pod就不会被加入任何的set中.
 				continue
 			}
+			//没有在podStorage中找到,则为新增的Pod, 放置于addPods中
 			recordFirstSeenTime(ref)
+			// kubelet启动时, list得到的全量pods会被存放至此
+			// 之后每一个新增的pod都会被更新至该字段中
 			pods[ref.UID] = ref
 			addPods = append(addPods, ref)
 		}
@@ -338,11 +346,13 @@ func (s *podStorage) seenSources(sources ...string) bool {
 	return s.sourcesSeen.HasAll(sources...)
 }
 
+//按照PodFullName过滤掉重复的Pod
 func filterInvalidPods(pods []*v1.Pod, source string, recorder record.EventRecorder) (filtered []*v1.Pod) {
 	names := sets.String{}
 	for i, pod := range pods {
 		// Pods from each source are assumed to have passed validation individually.
 		// This function only checks if there is any naming conflict.
+		// name = {pod.Name}_{pod.Namespace}
 		name := kubecontainer.GetPodFullName(pod)
 		if names.Has(name) {
 			glog.Warningf("Pod[%d] (%s) from %s failed validation due to duplicate pod name %q, ignoring", i+1, format.Pod(pod), source, pod.Name)
@@ -443,10 +453,16 @@ func checkAndUpdatePod(existing, ref *v1.Pod) (needUpdate, needReconcile, needGr
 	// 1. this is a reconcile
 	// TODO: it would be better to update the whole object and only preserve certain things
 	//       like the source annotation or the UID (to ensure safety)
+	// 判断该change是否为有意义的change
+	// 如果 existing.Spec == ref.Spec && existing.Labels == ref.Labels
+	// existing.DeletionTimestamp == ref.DeletionTimestamp && existing.DeletionGracePeriodSeconds && ref.DeletionGracePeriodSeconds
+	// existing.Annotations == existing.Annotations, 则表示此次更改为非meaningful change, 返回false
+	// 只要有一个不同, 则为meaningful change.
 	if !podsDifferSemantically(existing, ref) {
 		// this is not an update
 		// Only check reconcile when it is not an update, because if the pod is going to
 		// be updated, an extra reconcile is unnecessary
+		// 如果只有existing.Status有了变动, 则返回needReconcile
 		if !reflect.DeepEqual(existing.Status, ref.Status) {
 			// Pod with changed pod status needs reconcile, because kubelet should
 			// be the source of truth of pod status.
@@ -468,10 +484,12 @@ func checkAndUpdatePod(existing, ref *v1.Pod) (needUpdate, needReconcile, needGr
 	updateAnnotations(existing, ref)
 
 	// 2. this is an graceful delete
+	// 如果为meaningful change, 但DeletionTimestamp != nil, 则该Pod需要GraceDelete, 返回needGracefulDelete事件
 	if ref.DeletionTimestamp != nil {
 		needGracefulDelete = true
 	} else {
 		// 3. this is an update
+		// 如果为meaningful change， 且DeletionTimestamp == nil, 则表示该Pod需要更新, 则返回needUpdate事件
 		needUpdate = true
 	}
 

@@ -871,6 +871,7 @@ func (kl *Kubelet) getPullSecretsForPod(pod *v1.Pod) []v1.Secret {
 }
 
 // podIsTerminated returns true if pod is in the terminated state ("Failed" or "Succeeded").
+// 如果一个Pod的状态为Failed 或者 Succeeded 或者 (pod的DeletionTimestamp != nil && isNotRunning), 那么就认为该Pod状态为Terminated
 func (kl *Kubelet) podIsTerminated(pod *v1.Pod) bool {
 	// Check the cached pod status which was set after the last sync.
 	status, ok := kl.statusManager.GetPodStatus(pod.UID)
@@ -953,6 +954,7 @@ func (kl *Kubelet) podResourcesAreReclaimed(pod *v1.Pod) bool {
 
 // notRunning returns true if every status is terminated or waiting, or the status list
 // is empty.
+// 一个Pod包含多个container, 只要有一个容器的状态的即不是Terminated也不是Waiting, 那么我们就认为该Pod的状态为running
 func notRunning(statuses []v1.ContainerStatus) bool {
 	for _, status := range statuses {
 		if status.State.Terminated == nil && status.State.Waiting == nil {
