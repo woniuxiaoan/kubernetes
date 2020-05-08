@@ -2044,6 +2044,7 @@ func (kl *Kubelet) HandlePodAdditions(pods []*v1.Pod) {
 		// manager as the source of truth for the desired state. If a pod does
 		// not exist in the pod manager, it means that it has been deleted in
 		// the apiserver and no action (other than cleanup) is required.
+		// kubelet依赖pod-manager来存储pod期望达到的状态
 		kl.podManager.AddPod(pod)
 
 		// 查看该pod是否为mirrorPod, 通过查看该pod是否含有"kubernetes.io/config.mirror" annotation
