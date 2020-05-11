@@ -1676,12 +1676,14 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 	}
 
 	// Fetch the pull secrets for the pod
+	// 从Pod中获取拉取镜像的secrets
 	pullSecrets := kl.getPullSecretsForPod(pod)
 
 	// Call the container runtime's SyncPod callback
 	// 对监听到的变动Pod进行实际操作
 	// pullSecrets: 拉取镜像用的 secret
 	// pod: 监听到的变动Pod对象
+	// SyncPod具体实现可参考 pkg/kubelet/kuberuntime/kuberuntime_manager.go, line:570行左右
 	result := kl.containerRuntime.SyncPod(pod, apiPodStatus, podStatus, pullSecrets, kl.backOff)
 	kl.reasonCache.Update(pod.UID, result)
 	if err := result.Error(); err != nil {
