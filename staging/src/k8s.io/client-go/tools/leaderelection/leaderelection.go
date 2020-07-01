@@ -152,6 +152,9 @@ func (le *LeaderElector) Run() {
 	// 已阻塞的方式定期进行renew, 如果renew失败, 则该函数结束, stop就会被关闭
 	// 此时OnStartedLeading函数就会退出, 针对kube-scheduler就是调度器退出了
 	// 之后的重启操作就是systemctl的事情了.
+	
+	// 所以需要注意的一点是, renew失败后程序并不会再次尝试acquire锁了, 所以此时如果程序不退出
+	// 那么该实例就会一直处在不可用状态了.
 	le.renew()
 	close(stop)
 }
