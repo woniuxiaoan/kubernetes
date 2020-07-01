@@ -608,6 +608,7 @@ func (s *SchedulerServer) Run(stop chan struct{}) error {
 	}
 
 	// If leader election is enabled, run via LeaderElector until done and exit.
+	// 如果开启了LeaderElection, 则需要进行Leader选举, 否则多个实例每个都会生效
 	if s.LeaderElection != nil {
 		s.LeaderElection.Callbacks = leaderelection.LeaderCallbacks{
 			OnStartedLeading: run,

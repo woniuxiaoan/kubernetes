@@ -140,9 +140,18 @@ func (le *LeaderElector) Run() {
 		runtime.HandleCrash()
 		le.config.Callbacks.OnStoppedLeading()
 	}()
+
+	// 该过程是block的, 即会一直循环, 直至成功拿到锁, 函数才会退出
 	le.acquire()
+
 	stop := make(chan struct{})
+
+	// 以goroutine方式运行OnStartedLeading函数, scheduler中该函数为run, 即真正的调度程序
 	go le.config.Callbacks.OnStartedLeading(stop)
+
+	// 已阻塞的方式定期进行renew, 如果renew失败, 则该函数结束, stop就会被关闭
+	// 此时OnStartedLeading函数就会退出, 针对kube-scheduler就是调度器退出了
+	// 之后的重启操作就是systemctl的事情了.
 	le.renew()
 	close(stop)
 }
