@@ -161,6 +161,7 @@ func (cgc *containerGC) removeSandbox(sandboxID string) {
 // evictableContainers gets all containers that are evictable. Evictable containers are: not running
 // and created more than MinAge ago.
 // 找到该节点上状态！= running且创建时间大于MinAge的容器
+// 搜集MinAge之前创建的且 not running的容器
 func (cgc *containerGC) evictableContainers(minAge time.Duration) (containersByEvictUnit, error) {
 	containers, err := cgc.manager.getKubeletContainers(true)
 	if err != nil {
@@ -300,7 +301,7 @@ func (cgc *containerGC) evictSandboxes(evictTerminatedPods bool) error {
 		}
 
 		// Set sandboxes that still have containers to be active.
-		// 说明该sandbox 还有container, 则该sandbox还是active的
+		// 说明该sandbox 还有container, 则该sandbox还是active的。注意此时并没有要求container为running状态
 		if sandboxIDs.Has(sandbox.Id) {
 			sandboxInfo.active = true
 		}
@@ -333,6 +334,8 @@ func (cgc *containerGC) evictSandboxes(evictTerminatedPods bool) error {
 
 // evictPodLogsDirectories evicts all evictable pod logs directories. Pod logs directories
 // are evictable if there are no corresponding pods.
+// 如果该Pod已经被删除,则删除/var/log/pods下对应文件夹下的所有文件
+// pods下的目录名称都是pod的uid
 func (cgc *containerGC) evictPodLogsDirectories(allSourcesReady bool) error {
 	osInterface := cgc.manager.osInterface
 	if allSourcesReady {
@@ -347,6 +350,8 @@ func (cgc *containerGC) evictPodLogsDirectories(allSourcesReady bool) error {
 			if !cgc.podStateProvider.IsPodDeleted(podUID) {
 				continue
 			}
+			// 通过文件夹名字拿到podUID,根据UID判断该Pod是否为deleted, 如果是则删除该文件夹下的所有文件
+			// 滚动更新就是这个情况, 滚动更新会删除老Pod, 所以此时该Pod的所有log文件就都会被删除掉
 			err := osInterface.RemoveAll(filepath.Join(podLogsRootDirectory, name))
 			if err != nil {
 				glog.Errorf("Failed to remove pod logs directory %q: %v", name, err)
@@ -379,17 +384,29 @@ func (cgc *containerGC) evictPodLogsDirectories(allSourcesReady bool) error {
 // * removes oldest dead containers by enforcing gcPolicy.MaxContainers.
 // * gets evictable sandboxes which are not ready and contains no containers.
 // * removes evictable sandboxes.
+// kubelet针对log的GC的目标只是针对 /var/log/contaienrs/xx 和 /var/log/pods, 因为这两个是kubernetes系统的
+// /opt/docker/containers下面的log文件是docker daemon自己的log文件, 和kubernetes无关, 所以kubelet GC不会对此文件件做操作
+// 当kubelet调用docker daemon接口删除容器时, /opt/docker/contaienrs 对应的container log会被删除. 也就是将kubelet是简介通过docker 删除的该文件夹下log
+// 而不是直接管理删除的.
 func (cgc *containerGC) GarbageCollect(gcPolicy kubecontainer.ContainerGCPolicy, allSourcesReady bool, evictTerminatedPods bool) error {
 	// Remove evictable containers
+	// 按照设定的标准, 清除Pod中每个container的超额容器
+	// 通过该操作也会清除该container的对应log, 包括:
+	//   1. /var/log/pods/{podUID}/{containerName}/{restartCounter}.log, 注意该log是/opt/docker/containers/{containerID}/xxx.log的软链
+	//   2. /var/log/containers/(podName + podNamespace + containerName + containerID).log, 注意该log是上面log的软链
+	//   !!! /opt/docker/containers/{containerID}/xxx.log才是实打实的log, 但是此步骤并没有删除该log
 	if err := cgc.evictContainers(gcPolicy, allSourcesReady, evictTerminatedPods); err != nil {
 		return err
 	}
 
 	// Remove sandboxes with zero containers
+	// 以podUID为单位, 如果对应的pod已经删除, 那么则删除属于该Pod的所有sandbox， 删除sandbox不会删除log， 只是单纯的删sandbox
+	// 如果pod不是deleted， 则删除该pod中所有状态不是active的sandbox. (只要sandbox还有对应的container在, 无论此container是死是活)
 	if err := cgc.evictSandboxes(evictTerminatedPods); err != nil {
 		return err
 	}
 
 	// Remove pod sandbox log directory
+	// 遍历/var/log/pods文件夹, 通过dirname来获取pod状态, 如果pod已经删除, 则删除该pod对应的问价夹, 即/var/log/pods/{podUID}
 	return cgc.evictPodLogsDirectories(allSourcesReady)
 }

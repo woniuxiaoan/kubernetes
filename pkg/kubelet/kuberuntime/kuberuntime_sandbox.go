@@ -41,6 +41,7 @@ func (m *kubeGenericRuntimeManager) createPodSandbox(pod *v1.Pod, attempt uint32
 	}
 
 	// Create pod logs directory
+	// 创建该Pod所对应的日志目录, 即/var/logs/pods/{pod_UID}
 	err = m.osInterface.MkdirAll(podSandboxConfig.LogDirectory, 0755)
 	if err != nil {
 		message := fmt.Sprintf("Create pod log directory for pod %q failed: %v", format.Pod(pod), err)
@@ -49,7 +50,8 @@ func (m *kubeGenericRuntimeManager) createPodSandbox(pod *v1.Pod, attempt uint32
 	}
 
 	//runtimeService里面有到dockershim(grpc server的客户端)的一个connection
-	//RunPodSandbox 实在是调用了 dockershim 的一个grpc method
+	//RunPodSandbox内部调用了dockershim 的一个grpc method
+	//RunPodSandbox: pkg/kubelet/remote/remote_runtime.go, line: 82
 	podSandBoxID, err := m.runtimeService.RunPodSandbox(podSandboxConfig)
 	if err != nil {
 		message := fmt.Sprintf("CreatePodSandbox for pod %q failed: %v", format.Pod(pod), err)

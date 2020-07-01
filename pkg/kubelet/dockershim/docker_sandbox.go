@@ -82,6 +82,7 @@ func (ds *dockerService) RunPodSandbox(ctx context.Context, r *runtimeapi.RunPod
 	config := r.GetConfig()
 
 	// Step 1: Pull the image for the sandbox.
+	// 选取默认的sandbox镜像: k8s.gcr.io/pause-amd64:3.1
 	image := defaultSandboxImage
 	podSandboxImage := ds.podSandboxImage
 	if len(podSandboxImage) != 0 {
@@ -96,12 +97,13 @@ func (ds *dockerService) RunPodSandbox(ctx context.Context, r *runtimeapi.RunPod
 	}
 
 	// Step 2: Create the sandbox container.
+	// 获取创建sandbox所用到的config
 	createConfig, err := ds.makeSandboxDockerConfig(config, image)
 	if err != nil {
 		return nil, fmt.Errorf("failed to make sandbox docker config for pod %q: %v", config.Metadata.Name, err)
 	}
 
-	//调用containerd (http server)提供的接口创建一个container
+	//调用dockerd daemon (http server)提供的接口创建一个sandbox类型的container
 	//containerd url: /containers/create [POST]
 	//createConfig里面包含pause容器的配置, 比如镜像
 	createResp, err := ds.client.CreateContainer(*createConfig)
@@ -131,7 +133,7 @@ func (ds *dockerService) RunPodSandbox(ctx context.Context, r *runtimeapi.RunPod
 	// Step 4: Start the sandbox container.
 	// Assume kubelet's garbage collector would remove the sandbox later, if
 	// startContainer failed.
-	//调用containerd (http server)提供的接口启动sandbox容器，即pause容器
+	//调用dockerd daemon (http server)提供的接口启动sandbox容器，即pause容器
 	err = ds.client.StartContainer(createResp.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start sandbox container for pod %q: %v", config.Metadata.Name, err)
@@ -170,7 +172,8 @@ func (ds *dockerService) RunPodSandbox(ctx context.Context, r *runtimeapi.RunPod
 	// namespace已经设置好了。
 	cID := kubecontainer.BuildContainerID(runtimeName, createResp.ID)
 
-
+	//调用指定目录下的cni插件设定sandbox的网络协议栈, 包括网卡、路由表、回环设备等等.
+	//SetUpPod: pkg/kubelet/network/cni/cni.go, line:215
 	err = ds.network.SetUpPod(config.GetMetadata().Namespace, config.GetMetadata().Name, cID, config.Annotations)
 	if err != nil {
 		// TODO(random-liu): Do we need to teardown network here?

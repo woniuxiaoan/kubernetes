@@ -346,6 +346,12 @@ func (s *sharedIndexInformer) AddEventHandlerWithResyncPeriod(handler ResourceEv
 }
 
 //这个函数就是在DeltaFifo在执行Pop操作时，负责处理pop出的deltas的。
+//所以具体distribute的事件是什么类型(add, update, delete)是deleta事件类型和localStore联合决定的
+// 1. sync, add, update delta:
+//    a. localStore没找到: add到localStore, 然后distribute add event
+//    b. localStore找到: update localStore, 然后distribute update event
+// 2. delete delta: delete localStore, 然后distribute delete event
+// 综上可得distribute的事件类型是跟着localStore的动作走的.
 func (s *sharedIndexInformer) HandleDeltas(obj interface{}) error {
 	s.blockDeltas.Lock()
 	defer s.blockDeltas.Unlock()
@@ -356,8 +362,6 @@ func (s *sharedIndexInformer) HandleDeltas(obj interface{}) error {
 		case Sync, Added, Updated:
 			isSync := d.Type == Sync
 			s.cacheMutationDetector.AddObject(d.Object)
-			//如果是Sync、add、update action， localstore没有找到该delta对象，则添加值localstore，否则则更新本地localstore。
-			//然后通知处理器处理事件
 			if old, exists, err := s.indexer.Get(d.Object); err == nil && exists {
 				if err := s.indexer.Update(d.Object); err != nil {
 					return err
