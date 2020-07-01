@@ -173,6 +173,10 @@ func (le *LeaderElector) acquire() {
 	stop := make(chan struct{})
 	desc := le.config.Lock.Describe()
 	glog.Infof("attempting to acquire leader lease  %v...", desc)
+
+	//会每隔RetryPeriod seconds运行一次func, 直到stop closed
+	//下面的逻辑就是在acquire获取锁时, 如果获取失败则会一直停留在此, 直至成功获取锁, close stop, JitterUntil退出
+	//acquire包含两个含义: 没有获得锁则获取锁, 获得了锁则定时Renew
 	wait.JitterUntil(func() {
 		succeeded := le.tryAcquireOrRenew()
 		le.maybeReportTransition()
@@ -183,6 +187,7 @@ func (le *LeaderElector) acquire() {
 		le.config.Lock.RecordEvent("became leader")
 		glog.Infof("successfully acquired lease %v", desc)
 		close(stop)
+		//每隔RetryPeriod seconds运行一次func
 	}, le.config.RetryPeriod, JitterFactor, true, stop)
 }
 
@@ -218,16 +223,21 @@ func (le *LeaderElector) tryAcquireOrRenew() bool {
 	}
 
 	// 1. obtain or create the ElectionRecord
+	// 从client中获取指定名称的资源, 没有则尝试以创建方式获取锁, 有则尝试以更新方式获取锁
 	oldLeaderElectionRecord, err := le.config.Lock.Get()
 	if err != nil {
 		if !errors.IsNotFound(err) {
 			glog.Errorf("error retrieving resource lock %v: %v", le.config.Lock.Describe(), err)
 			return false
 		}
+
+		// 即如果没有找到, 则尝试创建, 创建成功即标识获得锁, 成为master节点
 		if err = le.config.Lock.Create(leaderElectionRecord); err != nil {
 			glog.Errorf("error initially creating leader election record: %v", err)
 			return false
 		}
+
+		// 更新自己所记录的leaderElectionRecord内容
 		le.observedRecord = leaderElectionRecord
 		le.observedTime = time.Now()
 		return true
@@ -238,6 +248,8 @@ func (le *LeaderElector) tryAcquireOrRenew() bool {
 		le.observedRecord = *oldLeaderElectionRecord
 		le.observedTime = time.Now()
 	}
+
+	// 如果该锁租期还没有到 & 该锁拥有者不是自己, 则获取锁失败
 	if le.observedTime.Add(le.config.LeaseDuration).After(now.Time) &&
 		oldLeaderElectionRecord.HolderIdentity != le.config.Lock.Identity() {
 		glog.V(4).Infof("lock is held by %v and has not yet expired", oldLeaderElectionRecord.HolderIdentity)
@@ -254,10 +266,13 @@ func (le *LeaderElector) tryAcquireOrRenew() bool {
 	}
 
 	// update the lock itself
+	// 即如果已有master没有及时renew lock, 那么该实例就可以更新该实例, 更新成功即标识着获得锁.
 	if err = le.config.Lock.Update(leaderElectionRecord); err != nil {
 		glog.Errorf("Failed to update lock: %v", err)
 		return false
 	}
+
+	// 成功获取锁后(更新方式获取), 更新本地元数据
 	le.observedRecord = leaderElectionRecord
 	le.observedTime = time.Now()
 	return true

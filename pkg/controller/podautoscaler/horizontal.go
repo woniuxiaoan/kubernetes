@@ -166,6 +166,7 @@ func (a *HorizontalController) deleteHPA(obj interface{}) {
 	a.queue.Forget(key)
 }
 
+//注意worker进程是用来处理监听到的hpa的, 而不是针对做podautoscaler的
 func (a *HorizontalController) worker() {
 	for a.processNextWorkItem() {
 	}
@@ -193,6 +194,7 @@ func (a *HorizontalController) processNextWorkItem() bool {
 // Computes the desired number of replicas for the metric specifications listed in the HPA, returning the maximum
 // of the computed replica counts, a description of the associated metric, and the statuses of all metrics
 // computed.
+// 这个是hpa的核心, 用于计算是否需要recale, 以及需要多少.
 func (a *HorizontalController) computeReplicasForMetrics(hpa *autoscalingv2.HorizontalPodAutoscaler, scale *autoscalingv1.Scale,
 	metricSpecs []autoscalingv2.MetricSpec) (replicas int32, metric string, statuses []autoscalingv2.MetricStatus, timestamp time.Time, err error) {
 
@@ -432,6 +434,7 @@ func (a *HorizontalController) reconcileAutoscaler(hpav1Shared *autoscalingv1.Ho
 		return fmt.Errorf("failed to query scale subresource for %s: %v", reference, err)
 	}
 	setCondition(hpa, autoscalingv2.AbleToScale, v1.ConditionTrue, "SucceededGetScale", "the HPA controller was able to get the target's current scale")
+	// 获取当前待调整对象的实例数
 	currentReplicas := scale.Status.Replicas
 
 	var metricStatuses []autoscalingv2.MetricStatus
@@ -459,7 +462,7 @@ func (a *HorizontalController) reconcileAutoscaler(hpav1Shared *autoscalingv1.Ho
 	} else if currentReplicas == 0 {
 		rescaleReason = "Current number of replicas must be greater than 0"
 		desiredReplicas = 1
-	} else {
+	} else { // 这个状态就是 hpa.Spec.MinReplicas < currentReplicas < hpa.Spec.MaxReplicas
 		metricDesiredReplicas, metricName, metricStatuses, metricTimestamp, err = a.computeReplicasForMetrics(hpa, scale, hpa.Spec.Metrics)
 		if err != nil {
 			a.setCurrentReplicasInStatus(hpa, currentReplicas)

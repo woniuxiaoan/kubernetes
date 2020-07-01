@@ -566,6 +566,7 @@ func (f *DeltaFIFO) Replace(list []interface{}, resourceVersion string) error {
 		}
 	}
 
+	//WaitForCacheSync会一直等待该变量至true, 表示全量更新已经完成.
 	if !f.populated {
 		f.populated = true
 		f.initialPopulationCount = len(list) + queuedDeletions

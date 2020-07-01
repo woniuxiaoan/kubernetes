@@ -198,6 +198,7 @@ func (c *ReplicaCalculator) GetMetricReplicas(currentReplicas int32, targetUtili
 // namespace: hpa所在的namespace
 // currentReplicas: 即scaleTargetRef 所设定对象的当前replicas
 func (c *ReplicaCalculator) calcPlainMetricReplicas(metrics metricsclient.PodMetricsInfo, currentReplicas int32, targetUtilization int64, namespace string, selector labels.Selector) (replicaCount int32, utilization int64, err error) {
+	//podList拿到的就是待scale资源的podList
 	podList, err := c.podsGetter.Pods(namespace).List(metav1.ListOptions{LabelSelector: selector.String()})
 	if err != nil {
 		return 0, 0, fmt.Errorf("unable to get pods while calculating replica count: %v", err)

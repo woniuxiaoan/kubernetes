@@ -44,6 +44,7 @@ type ConfigMapLock struct {
 func (cml *ConfigMapLock) Get() (*LeaderElectionRecord, error) {
 	var record LeaderElectionRecord
 	var err error
+	// 获取指定namespace指定name的configMap
 	cml.cm, err = cml.Client.ConfigMaps(cml.ConfigMapMeta.Namespace).Get(cml.ConfigMapMeta.Name, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
@@ -60,6 +61,7 @@ func (cml *ConfigMapLock) Get() (*LeaderElectionRecord, error) {
 }
 
 // Create attempts to create a LeaderElectionRecord annotation
+// 创建锁, 即创建具有特定annotation的configMap
 func (cml *ConfigMapLock) Create(ler LeaderElectionRecord) error {
 	recordBytes, err := json.Marshal(ler)
 	if err != nil {
@@ -78,6 +80,7 @@ func (cml *ConfigMapLock) Create(ler LeaderElectionRecord) error {
 }
 
 // Update will update an existing annotation on a given resource.
+// 更新configMap的control-plane.alpha.kubernetes.io/leader
 func (cml *ConfigMapLock) Update(ler LeaderElectionRecord) error {
 	if cml.cm == nil {
 		return errors.New("endpoint not initialized, call get or create first")
