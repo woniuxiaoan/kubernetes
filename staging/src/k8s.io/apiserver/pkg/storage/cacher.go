@@ -156,6 +156,7 @@ type Cacher struct {
 	ready *ready
 
 	// Underlying storage.Interface.
+	// storage是连接etcd的, 也就是背后的裸存储
 	storage Interface
 
 	// Expected type of objects in the underlying cache.
@@ -174,6 +175,8 @@ type Cacher struct {
 	// watchers is mapping from the value of trigger function that a
 	// watcher is interested into the watchers
 	watcherIdx int
+
+	//watchers就是为每个请求创建的struct, 每个watch的client上来后都会被创建一个, 所以这里面有一个map
 	watchers   indexedWatchers
 
 	// Defines a time budget that can be spend on waiting for not-ready watchers
@@ -190,6 +193,8 @@ type Cacher struct {
 // Create a new Cacher responsible for servicing WATCH and LIST requests from
 // its internal cache and updating its cache in the background based on the
 // given configuration.
+// cacher的创建入口, apiserver中每种类型都有一个对应的cacher(猜测)
+// apiserver listAndWatch入口
 func NewCacherFromConfig(config CacherConfig) *Cacher {
 	watchCache := newWatchCache(config.CacheCapacity, config.KeyFunc, config.GetAttrsFunc)
 	listerWatcher := newCacherListerWatcher(config.Storage, config.ResourcePrefix, config.NewListFunc)
@@ -208,7 +213,12 @@ func NewCacherFromConfig(config CacherConfig) *Cacher {
 		ready:       newReady(),
 		storage:     config.Storage,
 		objectType:  reflect.TypeOf(config.Type),
+		//存储组件, 包含一个环形buffer以及一个localStore
+		//reflector的listAndWatch的存储对象就是watchCache
 		watchCache:  watchCache,
+
+		//listerWatcher则是利用etcd clientv3实现的
+		//而informer的listerWatcher则是利用apiserver的restful API
 		reflector:   cache.NewNamedReflector(reflectorName, listerWatcher, config.Type, watchCache, 0),
 		versioner:   config.Versioner,
 		triggerFunc: config.TriggerPublisherFunc,
@@ -227,7 +237,12 @@ func NewCacherFromConfig(config CacherConfig) *Cacher {
 		// So we will be simply closing the channel, and synchronizing on the WaitGroup.
 		stopCh: stopCh,
 	}
+
+	//设置watchEvent的处理函数processEvent, 该函数会将watchEvent发送至cacher.Incoming channel中.
+	//cacher会有逻辑将Incoming中的watchEvent发送至各个client端watch请求对应的watcher中, 即cacher.watchers.
 	watchCache.SetOnEvent(cacher.processEvent)
+
+	//分发event给Cacher所存储的各个watcher, 其中每个watcher都对应了一个client的watch请求
 	go cacher.dispatchEvents()
 
 	cacher.stopWg.Add(1)
@@ -288,6 +303,7 @@ func (c *Cacher) Delete(ctx context.Context, key string, out runtime.Object, pre
 }
 
 // Implements storage.Interface.
+// client端的每次watch操作都会调用该函数, 并为该client创建一个属于该次调用的watcher
 func (c *Cacher) Watch(ctx context.Context, key string, resourceVersion string, pred SelectionPredicate) (watch.Interface, error) {
 	watchRV, err := c.versioner.ParseWatchResourceVersion(resourceVersion)
 	if err != nil {
@@ -303,6 +319,7 @@ func (c *Cacher) Watch(ctx context.Context, key string, resourceVersion string, 
 	// underlying watchCache is calling processEvent under its lock.
 	c.watchCache.RLock()
 	defer c.watchCache.RUnlock()
+	// 先获取环形缓存中的已有的满足rv的event
 	initEvents, err := c.watchCache.GetAllEventsSinceThreadUnsafe(watchRV)
 	if err != nil {
 		// To match the uncached watch implementation, once we have passed authn/authz/admission,
@@ -337,6 +354,8 @@ func (c *Cacher) Watch(ctx context.Context, key string, resourceVersion string, 
 	c.Lock()
 	defer c.Unlock()
 	forget := forgetWatcher(c, c.watcherIdx, triggerValue, triggerSupported)
+
+	//会将initEvents放入watcher.result channel中, 这个channel中的event会源源不断的发给client端, 通过http chunked形式
 	watcher := newCacheWatcher(watchRV, chanSize, initEvents, filterWithAttrsFunction(key, pred), forget, c.versioner)
 
 	c.watchers.addWatcher(watcher, c.watcherIdx, triggerValue, triggerSupported)

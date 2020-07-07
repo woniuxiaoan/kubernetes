@@ -115,6 +115,7 @@ type watchCache struct {
 	// by endIndex (if cache is full it will be startIndex + capacity).
 	// Both startIndex and endIndex can be greater than buffer capacity -
 	// you should always apply modulo capacity to get an index in cache array.
+	// 环形缓存, watch的init数据来源于此缓存
 	cache      []watchCacheElement
 	startIndex int
 	endIndex   int
@@ -123,6 +124,7 @@ type watchCache struct {
 	// history" i.e. from the moment just after the newest cached watched event.
 	// It is necessary to effectively allow clients to start watching at now.
 	// NOTE: We assume that <store> is thread-safe.
+	//
 	store cache.Store
 
 	// ResourceVersion up to which the watchCache is propagated.
@@ -257,12 +259,17 @@ func (w *watchCache) processEvent(event watch.Event, resourceVersion uint64, upd
 		watchCacheEvent.PrevObjUninitialized = previousElem.Uninitialized
 	}
 
+	// onEvent为提前注入的函数, 即cacher.processEvent
+	// 该函数主要将watchCacheEvent放入cacher.incoming channel中
+	// cacher.incoming中的event会被dispatch至cacher中的各个watcher中, 从而给到各个client端
 	if w.onEvent != nil {
 		w.onEvent(watchCacheEvent)
 	}
 	w.updateCache(resourceVersion, watchCacheEvent)
 	w.resourceVersion = resourceVersion
 	w.cond.Broadcast()
+
+	// 更新watchCache中的本地存储即store, 其保留了某类资源的完成数据.
 	return updateFunc(elem)
 }
 
@@ -418,6 +425,8 @@ func (w *watchCache) SetOnEvent(onEvent func(*watchCacheEvent)) {
 	w.onEvent = onEvent
 }
 
+// 每次watch请求都会调用该函数, 获取指定rv之后的event
+// 因为环型缓存w.cache容量有限, 所以如果rv过旧, 可能会找不到而报 "too old resource version"的错误
 func (w *watchCache) GetAllEventsSinceThreadUnsafe(resourceVersion uint64) ([]*watchCacheEvent, error) {
 	size := w.endIndex - w.startIndex
 	// if we have no watch events in our cache, the oldest one we can successfully deliver to a watcher
