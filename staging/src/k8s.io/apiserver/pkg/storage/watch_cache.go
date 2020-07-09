@@ -115,7 +115,8 @@ type watchCache struct {
 	// by endIndex (if cache is full it will be startIndex + capacity).
 	// Both startIndex and endIndex can be greater than buffer capacity -
 	// you should always apply modulo capacity to get an index in cache array.
-	// 环形缓存, watch的init数据来源于此缓存
+	// 环形缓存, watch的init数据来源于此缓存. 环形缓存用来存储有限的最新事件. 所以当
+	// watch的版本如果过老, 就会收到类似 too old resourceVersion的提示.
 	cache      []watchCacheElement
 	startIndex int
 	endIndex   int
@@ -124,7 +125,8 @@ type watchCache struct {
 	// history" i.e. from the moment just after the newest cached watched event.
 	// It is necessary to effectively allow clients to start watching at now.
 	// NOTE: We assume that <store> is thread-safe.
-	//
+	// 其内部实则为一个threadSafeMap, 和informer的localStore是一样的其实。就是indexers
+	// indices, index之类的这些东西
 	store cache.Store
 
 	// ResourceVersion up to which the watchCache is propagated.

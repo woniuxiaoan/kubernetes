@@ -190,7 +190,7 @@ type deleteNotification struct {
 func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
 
-	//创建一个新的DeltaFiFo， 留意里面的s.indexer
+	//创建一个新的DeltaFiFo, 留意s.indexer, 其为threadSafe的本地存储
 	fifo := NewDeltaFIFO(MetaNamespaceKeyFunc, s.indexer)
 
 	cfg := &Config{
