@@ -71,9 +71,11 @@ func (v *authorizingVisitor) visit(source fmt.Stringer, rule *rbac.PolicyRule, e
 	return true
 }
 
+// RBAC基于request attrbutes验证该用户时候有权执行此次请求
 func (r *RBACAuthorizer) Authorize(requestAttributes authorizer.Attributes) (authorizer.Decision, string, error) {
 	ruleCheckingVisitor := &authorizingVisitor{requestAttributes: requestAttributes}
 
+	// 注意param2指的是请求url的namespace, 而不是该user的namespace
 	r.authorizationRuleResolver.VisitRulesFor(requestAttributes.GetUser(), requestAttributes.GetNamespace(), ruleCheckingVisitor.visit)
 	if ruleCheckingVisitor.allowed {
 		return authorizer.DecisionAllow, ruleCheckingVisitor.reason, nil
@@ -174,6 +176,7 @@ func RulesAllow(requestAttributes authorizer.Attributes, rules ...rbac.PolicyRul
 	return false
 }
 
+//对比request attributes与 rule, 判断此次请求是否满足此rule
 func RuleAllows(requestAttributes authorizer.Attributes, rule *rbac.PolicyRule) bool {
 	if requestAttributes.IsResourceRequest() {
 		combinedResource := requestAttributes.GetResource()

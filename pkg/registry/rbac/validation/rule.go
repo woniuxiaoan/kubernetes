@@ -164,6 +164,7 @@ func (r *DefaultRuleResolver) VisitRulesFor(user user.Info, namespace string, vi
 		}
 	} else {
 		sourceDescriber := &clusterRoleBindingDescriber{}
+		// 如果有多个clusterRoleBinding bind了同一个sa, 那么在权限检查时会检查所有的crb, 只要有一个crb的一个rule满足就允许访问
 		for _, clusterRoleBinding := range clusterRoleBindings {
 			subjectIndex, applies := appliesTo(user, clusterRoleBinding.Subjects, "")
 			if !applies {
@@ -179,6 +180,7 @@ func (r *DefaultRuleResolver) VisitRulesFor(user user.Info, namespace string, vi
 			sourceDescriber.binding = clusterRoleBinding
 			sourceDescriber.subject = &clusterRoleBinding.Subjects[subjectIndex]
 			for i := range rules {
+				//表示rules[1]允许了此次访问, 直接返回, 无需判断余下的rule了.
 				if !visitor(sourceDescriber, &rules[i], nil) {
 					return
 				}
@@ -186,6 +188,9 @@ func (r *DefaultRuleResolver) VisitRulesFor(user user.Info, namespace string, vi
 		}
 	}
 
+	//如果没有合适的clusterrolebinding, 则寻找request namespace下的rolebinding再寻找有没有合适的策略
+	//如果有合适的规则, 即visit()返回false, 则允许此次请求的访问, 剩下的也就无需判断.
+	//如果没有则就拒绝访问
 	if len(namespace) > 0 {
 		if roleBindings, err := r.roleBindingLister.ListRoleBindings(namespace); err != nil {
 			if !visitor(nil, nil, err) {
@@ -193,6 +198,7 @@ func (r *DefaultRuleResolver) VisitRulesFor(user user.Info, namespace string, vi
 			}
 		} else {
 			sourceDescriber := &roleBindingDescriber{}
+			// 如果有多个roleBinding bind了同一个sa, 那么在权限检查时会检查所有的rb, 只要有一个ra的一个rule满足就允许访问
 			for _, roleBinding := range roleBindings {
 				subjectIndex, applies := appliesTo(user, roleBinding.Subjects, namespace)
 				if !applies {
