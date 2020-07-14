@@ -168,6 +168,16 @@ func visitContainerConfigmapNames(container *api.Container, visitor Visitor) boo
 }
 
 // IsPodReady returns true if a pod is ready; false otherwise.
+// 判断Pod是否Ready, Pod.status中有标识ready相关的conditions, 该condition type为 Ready, 当其status == "True"时, 标识Pod已经ready.
+//内容如下:
+/*
+  - lastProbeTime: null
+    lastTransitionTime: "2020-06-24T14:43:44Z"
+    status: "True"
+    type: Ready
+*/
+
+// woooniuzhang pod状态 判断Pod是否ready step1
 func IsPodReady(pod *api.Pod) bool {
 	return IsPodReadyConditionTrue(pod.Status)
 }

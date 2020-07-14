@@ -189,8 +189,11 @@ func (e *EndpointController) getPodServiceMemberships(pod *v1.Pod) (sets.String,
 
 // When a pod is added, figure out what services it will be a member of and
 // enqueue them. obj must have *v1.Pod type.
+// 将service集合以namespace/name为key逐个加入queue中
 func (e *EndpointController) addPod(obj interface{}) {
 	pod := obj.(*v1.Pod)
+
+	// 获取该Pod对应的所有service
 	services, err := e.getPodServiceMemberships(pod)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("Unable to get pod %s/%s's service memberships: %v", pod.Namespace, pod.Name, err))

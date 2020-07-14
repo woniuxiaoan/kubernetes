@@ -1238,6 +1238,7 @@ func (kl *Kubelet) GetKubeletContainerLogs(podFullName, containerName string, lo
 }
 
 // getPhase returns the phase of a pod given its container info.
+// woooniuzhang pod状态 根据container状态判断pod状态
 func getPhase(spec *v1.PodSpec, info []v1.ContainerStatus) v1.PodPhase {
 	initialized := 0
 	pendingInitialization := 0
@@ -1286,6 +1287,7 @@ func getPhase(spec *v1.PodSpec, info []v1.ContainerStatus) v1.PodPhase {
 			continue
 		}
 
+		// 就是讲每个container都有三种状态: Running, Terminated, Waiting
 		switch {
 		case containerStatus.State.Running != nil:
 			running++
@@ -1368,6 +1370,7 @@ func (kl *Kubelet) generateAPIPodStatus(pod *v1.Pod, podStatus *kubecontainer.Po
 	// Assume info is ready to process
 	spec := &pod.Spec
 	allStatus := append(append([]v1.ContainerStatus{}, s.ContainerStatuses...), s.InitContainerStatuses...)
+	// 根据ContainerStatuses与InitContainerStatuses来判断Pod的Phase, 即Running, Pending, Succeed, Failed, Unknown这些
 	s.Phase = getPhase(spec, allStatus)
 	// Check for illegal phase transition
 	if pod.Status.Phase == v1.PodFailed || pod.Status.Phase == v1.PodSucceeded {

@@ -1106,6 +1106,7 @@ type Kubelet struct {
 	pleg pleg.PodLifecycleEventGenerator
 
 	// Store kubecontainer.PodStatus for all pods.
+	// 专门用来存储Pod状态
 	podCache kubecontainer.Cache
 
 	// os is a facade for various syscalls that need to be mocked during testing.
