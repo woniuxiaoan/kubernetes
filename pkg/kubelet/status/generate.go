@@ -33,6 +33,7 @@ const (
 
 // GeneratePodReadyCondition returns ready condition if all containers in a pod are ready, else it
 // returns an unready condition.
+// woooniuzhang pod状态 ready判断 step2
 func GeneratePodReadyCondition(spec *v1.PodSpec, containerStatuses []v1.ContainerStatus, podPhase v1.PodPhase) v1.PodCondition {
 	// Find if all containers are ready or not.
 	if containerStatuses == nil {
@@ -45,7 +46,9 @@ func GeneratePodReadyCondition(spec *v1.PodSpec, containerStatuses []v1.Containe
 	unknownContainers := []string{}
 	unreadyContainers := []string{}
 	for _, container := range spec.Containers {
+		// Container共有三种state: Waiting, Running, Terminated
 		if containerStatus, ok := podutil.GetContainerStatus(containerStatuses, container.Name); ok {
+			// 就是说unready包括了waiting 以及 terminated
 			if !containerStatus.Ready {
 				unreadyContainers = append(unreadyContainers, container.Name)
 			}
@@ -71,6 +74,8 @@ func GeneratePodReadyCondition(spec *v1.PodSpec, containerStatuses []v1.Containe
 		unreadyMessages = append(unreadyMessages, fmt.Sprintf("containers with unready status: %s", unreadyContainers))
 	}
 	unreadyMessage := strings.Join(unreadyMessages, ", ")
+
+	//即如果Pod中有container处在unknown状态 或者 unready状态, 则该Pod处在unready状态
 	if unreadyMessage != "" {
 		return v1.PodCondition{
 			Type:    v1.PodReady,
@@ -80,6 +85,8 @@ func GeneratePodReadyCondition(spec *v1.PodSpec, containerStatuses []v1.Containe
 		}
 	}
 
+	//即Pod内的所有容器都处在Ready状态后, 该Pod才会ready
+	//容器的状态是从cri获取的
 	return v1.PodCondition{
 		Type:   v1.PodReady,
 		Status: v1.ConditionTrue,
