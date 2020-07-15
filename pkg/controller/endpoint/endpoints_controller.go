@@ -73,6 +73,7 @@ var (
 )
 
 // NewEndpointController returns a new *EndpointController.
+// woooniuzhang 可以将endpoints作为一个controller的模板进行使用
 func NewEndpointController(podInformer coreinformers.PodInformer, serviceInformer coreinformers.ServiceInformer,
 	endpointsInformer coreinformers.EndpointsInformer, client clientset.Interface) *EndpointController {
 	if client != nil && client.CoreV1().RESTClient().GetRateLimiter() != nil {
@@ -94,6 +95,7 @@ func NewEndpointController(podInformer coreinformers.PodInformer, serviceInforme
 	e.serviceLister = serviceInformer.Lister()
 	e.servicesSynced = serviceInformer.Informer().HasSynced
 
+	// pod的最终更新都会转到对应的svc中去
 	podInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    e.addPod,
 		UpdateFunc: e.updatePod,
@@ -193,12 +195,14 @@ func (e *EndpointController) getPodServiceMemberships(pod *v1.Pod) (sets.String,
 func (e *EndpointController) addPod(obj interface{}) {
 	pod := obj.(*v1.Pod)
 
-	// 获取该Pod对应的所有service
+	// 获取该Pod对应的所有service, 即Pod的label满足service的selector
 	services, err := e.getPodServiceMemberships(pod)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("Unable to get pod %s/%s's service memberships: %v", pod.Namespace, pod.Name, err))
 		return
 	}
+
+	// 将所涉及到的服务都放入队列中
 	for key := range services {
 		e.queue.Add(key)
 	}
@@ -385,6 +389,7 @@ func (e *EndpointController) handleErr(err error, key interface{}) {
 	utilruntime.HandleError(err)
 }
 
+//总体endpointController的作用就是通过watch pod及svc的event来为指定svc动态创建或者更新对应的endpoints, (默认会为每个svc创建一个endpoints）
 func (e *EndpointController) syncService(key string) error {
 	startTime := time.Now()
 	defer func() {
@@ -402,6 +407,7 @@ func (e *EndpointController) syncService(key string) error {
 		// service is deleted. However, if we're down at the time when
 		// the service is deleted, we will miss that deletion, so this
 		// doesn't completely solve the problem. See #6877.
+		// 如果删除了svc, 那么其对应的同名endpoints也会一并删除
 		err = e.client.CoreV1().Endpoints(namespace).Delete(name, nil)
 		if err != nil && !errors.IsNotFound(err) {
 			return err
@@ -437,11 +443,16 @@ func (e *EndpointController) syncService(key string) error {
 	var totalReadyEps int = 0
 	var totalNotReadyEps int = 0
 
+	// 这些pods都是该svc所包含的endpoint
 	for _, pod := range pods {
+
+		// 如果删除了
 		if len(pod.Status.PodIP) == 0 {
 			glog.V(5).Infof("Failed to find an IP for pod %s/%s", pod.Namespace, pod.Name)
 			continue
 		}
+
+		// 如果删除了pod, 那就会从对应的endpoints中摘除, endpoints.Name = svc.Name
 		if !tolerateUnreadyEndpoints && pod.DeletionTimestamp != nil {
 			glog.V(5).Infof("Pod is being deleted %s/%s", pod.Namespace, pod.Name)
 			continue
@@ -474,6 +485,7 @@ func (e *EndpointController) syncService(key string) error {
 
 				var readyEps, notReadyEps int
 				epp := v1.EndpointPort{Name: portName, Port: int32(portNum), Protocol: portProto}
+				// 如果pod已经就绪(其condition.type=Ready的值为true), 则会将其加入此次subsets中
 				subsets, readyEps, notReadyEps = addEndpointSubset(subsets, pod, epa, epp, tolerateUnreadyEndpoints)
 				totalReadyEps = totalReadyEps + readyEps
 				totalNotReadyEps = totalNotReadyEps + notReadyEps
@@ -483,8 +495,10 @@ func (e *EndpointController) syncService(key string) error {
 	subsets = endpoints.RepackSubsets(subsets)
 
 	// See if there's actually an update here.
+	// 获取当前svc对应endpoints
 	currentEndpoints, err := e.endpointsLister.Endpoints(service.Namespace).Get(service.Name)
 	if err != nil {
+		// 如果没有找到svc对应的endpoints, 则初始化一个与svc相同名称的endpoints
 		if errors.IsNotFound(err) {
 			currentEndpoints = &v1.Endpoints{
 				ObjectMeta: metav1.ObjectMeta{
@@ -497,6 +511,7 @@ func (e *EndpointController) syncService(key string) error {
 		}
 	}
 
+	//通过判断ResourceVersion来判断是否需要创建同名的endpoints
 	createEndpoints := len(currentEndpoints.ResourceVersion) == 0
 
 	if !createEndpoints &&
@@ -513,6 +528,8 @@ func (e *EndpointController) syncService(key string) error {
 	}
 
 	glog.V(4).Infof("Update endpoints for %v/%v, ready: %d not ready: %d", service.Namespace, service.Name, totalReadyEps, totalNotReadyEps)
+
+	// 如果需要创建同名endpoints, 则利用newEndpoints创建
 	if createEndpoints {
 		// No previous endpoints, create them
 		_, err = e.client.CoreV1().Endpoints(service.Namespace).Create(newEndpoints)
@@ -567,6 +584,9 @@ func addEndpointSubset(subsets []v1.EndpointSubset, pod *v1.Pod, epa v1.Endpoint
 	epp v1.EndpointPort, tolerateUnreadyEndpoints bool) ([]v1.EndpointSubset, int, int) {
 	var readyEps int = 0
 	var notReadyEps int = 0
+
+	//如果该Pod已经就绪, 则将其加入endpoints的subsets
+	//IsPodReady是重点, 其通过Ready Condition是否为True来判断Pod是否已经就绪
 	if tolerateUnreadyEndpoints || podutil.IsPodReady(pod) {
 		subsets = append(subsets, v1.EndpointSubset{
 			Addresses: []v1.EndpointAddress{epa},
