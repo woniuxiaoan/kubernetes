@@ -85,7 +85,7 @@ func GeneratePodReadyCondition(spec *v1.PodSpec, containerStatuses []v1.Containe
 		}
 	}
 
-	//即Pod内的所有容器都处在Ready状态后, 该Pod才会ready
+	//即Pod内的所有容器都Ready状态后, 该Pod才会ready
 	//容器的状态是从cri获取的
 	return v1.PodCondition{
 		Type:   v1.PodReady,
