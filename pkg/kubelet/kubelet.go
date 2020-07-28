@@ -801,6 +801,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		klet.containerLogManager = logs.NewStubContainerLogManager()
 	}
 
+	// kubelet中有各种manager, statusManager用来存储本地Pod的实时状态
 	klet.statusManager = status.NewManager(klet.kubeClient, klet.podManager, klet)
 
 	if utilfeature.DefaultFeatureGate.Enabled(features.RotateKubeletServerCertificate) && kubeDeps.TLSOptions != nil {
@@ -1481,6 +1482,7 @@ func (kl *Kubelet) GetKubeClient() clientset.Interface {
 // the most accurate information possible about an error situation to aid debugging.
 // Callers should not throw an event if this operation returns an error.
 // 该函数是监听到变动的Pod的对应handher, 之前应该还有事件封装, 以便生成syncPodOptions
+// woooniuzhang  kubelet操作pod入口
 func (kl *Kubelet) syncPod(o syncPodOptions) error {
 	// pull out the required options
 	pod := o.pod
@@ -1660,6 +1662,7 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 	}
 
 	// Make data directories for the pod
+	// 创建该Pod所用到的所有文件夹,
 	if err := kl.makePodDataDirs(pod); err != nil {
 		kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToMakePodDataDirectories, "error making pod data directories: %v", err)
 		glog.Errorf("Unable to make pod data directories for pod %q: %v", format.Pod(pod), err)

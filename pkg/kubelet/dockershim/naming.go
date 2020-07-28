@@ -55,6 +55,7 @@ const (
 	DockerPullableImageIDPrefix = "docker-pullable://"
 )
 
+// sandbox容器与普通容器的name都有一定格式组成
 func makeSandboxName(s *runtimeapi.PodSandboxConfig) string {
 	return strings.Join([]string{
 		kubePrefix,                            // 0

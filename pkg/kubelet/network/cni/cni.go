@@ -213,13 +213,14 @@ func (plugin *cniNetworkPlugin) Status() error {
 
 // RunPodSandbox会调用该方法, 此时namespace/name/annotations为Pod信息， id为pause容器的containerID
 // 调用CNI插件来设定sandbox的网络协议栈
-// important point: CNI
+// woooniuzhang cni SetUpPod
 func (plugin *cniNetworkPlugin) SetUpPod(namespace string, name string, id kubecontainer.ContainerID, annotations map[string]string) error {
 	if err := plugin.checkInitialized(); err != nil {
 		return err
 	}
 
 	// 获取容器所在的network namespace路径, 即/proc/{sandbox_pid}/ns/net, 该文件为一个软链
+	// 该步骤是通过调用 docker-http-client实现的
 	netnsPath, err := plugin.host.GetNetNS(id.ID)
 	if err != nil {
 		return fmt.Errorf("CNI failed to retrieve network namespace path: %v", err)

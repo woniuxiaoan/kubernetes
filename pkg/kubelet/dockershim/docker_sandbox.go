@@ -78,6 +78,7 @@ func (ds *dockerService) clearNetworkReady(podSandboxID string) {
 // Note: docker doesn't use LogDirectory (yet).
 // kubelet就是通过grpc 远程调用该method 创建了pause容器
 // 参数r里面包含待创建Pod: name, namespace, uid, labels, annotations
+// woooniuzhang 创建sandbox
 func (ds *dockerService) RunPodSandbox(ctx context.Context, r *runtimeapi.RunPodSandboxRequest) (*runtimeapi.RunPodSandboxResponse, error) {
 	config := r.GetConfig()
 
@@ -168,11 +169,11 @@ func (ds *dockerService) RunPodSandbox(ctx context.Context, r *runtimeapi.RunPod
 	// sandbox networking, but it might insert iptables rules or open ports
 	// on the host as well, to satisfy parts of the pod spec that aren't
 	// recognized by the CNI standard yet.
-	// 拿到pause容器的id,一遍设置该容器的网络。此时pause已经启动,就是说该Pod的network
+	// 拿到pause容器的id,以便设置该容器的网络。此时pause已经启动,就是说该Pod的network
 	// namespace已经设置好了。
 	cID := kubecontainer.BuildContainerID(runtimeName, createResp.ID)
 
-	//调用指定目录下的cni插件设定sandbox的网络协议栈, 包括网卡、路由表、回环设备等等.
+	//调用指定目录下的cni插件设定sandbox的网络协议栈, 包括网卡、路由表、回环设备, iptables等等.
 	//SetUpPod: pkg/kubelet/network/cni/cni.go, line:215
 	err = ds.network.SetUpPod(config.GetMetadata().Namespace, config.GetMetadata().Name, cID, config.Annotations)
 	if err != nil {
@@ -366,6 +367,8 @@ func (ds *dockerService) getIP(podSandboxID string, sandbox *dockertypes.Contain
 	// FIXME: handle network errors by restarting the pod somehow?
 	glog.Warningf("failed to read pod IP from plugin/docker: %v", err)
 	return ""
+
+
 }
 
 // Returns the inspect container response, the sandbox metadata, and network namespace mode
@@ -564,6 +567,7 @@ func (ds *dockerService) makeSandboxDockerConfig(c *runtimeapi.PodSandboxConfig,
 	// Merge annotations and labels because docker supports only labels.
 	labels := makeLabels(c.GetLabels(), c.GetAnnotations())
 	// Apply a label to distinguish sandboxes from regular containers.
+	// 容器也有类型相关的label, 用于区分sandbox 与 普通container.
 	labels[containerTypeLabelKey] = containerTypeLabelSandbox
 	// Apply a container name label for infra container. This is used in summary v1.
 	// TODO(random-liu): Deprecate this label once container metrics is directly got from CRI.

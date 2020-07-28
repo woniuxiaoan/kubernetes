@@ -386,7 +386,7 @@ func (cgc *containerGC) evictPodLogsDirectories(allSourcesReady bool) error {
 // * removes evictable sandboxes.
 // kubelet针对log的GC的目标只是针对 /var/log/contaienrs/xx 和 /var/log/pods, 因为这两个是kubernetes系统的
 // /opt/docker/containers下面的log文件是docker daemon自己的log文件, 和kubernetes无关, 所以kubelet GC不会对此文件件做操作
-// 当kubelet调用docker daemon接口删除容器时, /opt/docker/contaienrs 对应的container log会被删除. 也就是将kubelet是简介通过docker 删除的该文件夹下log
+// 当kubelet调用docker daemon接口删除容器时, /opt/docker/containers对应的container log会被删除. 也就是将kubelet是简介通过docker 删除的该文件夹下log
 // 而不是直接管理删除的.
 func (cgc *containerGC) GarbageCollect(gcPolicy kubecontainer.ContainerGCPolicy, allSourcesReady bool, evictTerminatedPods bool) error {
 	// Remove evictable containers
@@ -407,6 +407,6 @@ func (cgc *containerGC) GarbageCollect(gcPolicy kubecontainer.ContainerGCPolicy,
 	}
 
 	// Remove pod sandbox log directory
-	// 遍历/var/log/pods文件夹, 通过dirname来获取pod状态, 如果pod已经删除, 则删除该pod对应的问价夹, 即/var/log/pods/{podUID}
+	// 遍历/var/log/pods文件夹, 通过dirname来获取pod状态, 如果pod已经删除, 则删除该pod对应的文件夹, 即/var/log/pods/{podUID}
 	return cgc.evictPodLogsDirectories(allSourcesReady)
 }
