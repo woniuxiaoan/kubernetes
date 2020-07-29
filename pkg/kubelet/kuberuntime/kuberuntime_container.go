@@ -795,6 +795,7 @@ func (m *kubeGenericRuntimeManager) removeContainer(containerID string) error {
 
 	// Remove the container log.
 	// TODO: Separate log and container lifecycle management.
+	// 删除该container在/var/log/containers中对应的日志文件(该日志文件只是一个symlink)
 	if err := m.removeContainerLog(containerID); err != nil {
 		return err
 	}
@@ -803,6 +804,7 @@ func (m *kubeGenericRuntimeManager) removeContainer(containerID string) error {
 }
 
 // removeContainerLog removes the container log.
+// 删除该container对应的位于/var/log/containers中的日志, 注意该目录中的日志都是symlink, 而不是真正的日志文件
 func (m *kubeGenericRuntimeManager) removeContainerLog(containerID string) error {
 	// Remove the container log.
 	status, err := m.runtimeService.ContainerStatus(containerID)

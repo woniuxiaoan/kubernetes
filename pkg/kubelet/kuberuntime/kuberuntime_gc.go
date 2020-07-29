@@ -160,7 +160,7 @@ func (cgc *containerGC) removeSandbox(sandboxID string) {
 
 // evictableContainers gets all containers that are evictable. Evictable containers are: not running
 // and created more than MinAge ago.
-// 找到该节点上状态！= running且创建时间大于MinAge的容器
+// 找到该节点上状态 !=running且创建时间大于MinAge的容器
 // 搜集MinAge之前创建的且 not running的容器
 func (cgc *containerGC) evictableContainers(minAge time.Duration) (containersByEvictUnit, error) {
 	containers, err := cgc.manager.getKubeletContainers(true)
