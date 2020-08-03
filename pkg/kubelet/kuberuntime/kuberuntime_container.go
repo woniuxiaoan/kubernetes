@@ -449,6 +449,7 @@ func toKubeContainerStatus(status *runtimeapi.ContainerStatus, runtimeName strin
 }
 
 // executePreStopHook runs the pre-stop lifecycle hooks if applicable and returns the duration it takes.
+// 该函数最多等待gracePeriod时间, 并返回从开始执行preStop到函数返回所用的时间
 func (m *kubeGenericRuntimeManager) executePreStopHook(pod *v1.Pod, containerID kubecontainer.ContainerID, containerSpec *v1.Container, gracePeriod int64) int64 {
 	glog.V(3).Infof("Running preStop hook for container %q", containerID.String())
 
@@ -548,6 +549,7 @@ func (m *kubeGenericRuntimeManager) killContainer(pod *v1.Pod, containerID kubec
 	glog.V(2).Infof("Killing container %q with %d second grace period", containerID.String(), gracePeriod)
 
 	// Run internal pre-stop lifecycle hook
+	// 此动作在做一些待停止前的工作,并未执行实质的停止操作
 	if err := m.internalLifecycle.PreStopContainer(containerID.ID); err != nil {
 		return err
 	}
@@ -565,6 +567,7 @@ func (m *kubeGenericRuntimeManager) killContainer(pod *v1.Pod, containerID kubec
 		glog.V(3).Infof("Killing container %q, but using %d second grace period override", containerID, gracePeriod)
 	}
 
+	// 此处的gracePeriod就是max(terminationGracePeriodSeconds - preStop执行时间, minimumGracePeriodInSeconds)
 	err := m.runtimeService.StopContainer(containerID.ID, gracePeriod)
 	if err != nil {
 		glog.Errorf("Container %q termination failed with gracePeriod %d: %v", containerID.String(), gracePeriod, err)

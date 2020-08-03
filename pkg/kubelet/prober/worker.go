@@ -82,6 +82,8 @@ func newWorker(
 		probeManager: m,
 	}
 
+	//可以知道readinessProbe默认为Failure,即新建的Pod在initialDelaySeconds之前是Unready,之后开始定期doProbe来确定该Pod的ready状态
+	//livenessProbe默认为诶Success,即新建的Pod在initalDelaySeconds之前是Running(当然这期间容器进程没有退出 或者 奔溃),之后开始定期doProbe来确定是否重启该Pod
 	switch probeType {
 	case readiness:
 		w.spec = container.ReadinessProbe
@@ -139,6 +141,7 @@ func (w *worker) stop() {
 
 // doProbe probes the container once and records the result.
 // Returns whether the worker should continue.
+// 容器每个probe对应的worker都会按照设定的periodDuration来执行该函数,执行探活逻辑
 func (w *worker) doProbe() (keepGoing bool) {
 	defer func() { recover() }() // Actually eat panics (HandleCrash takes care of logging)
 	defer runtime.HandleCrash(func(_ interface{}) { keepGoing = true })
@@ -191,6 +194,8 @@ func (w *worker) doProbe() (keepGoing bool) {
 			w.pod.Spec.RestartPolicy != v1.RestartPolicyNever
 	}
 
+	// 从容器State为Running开始, 一直持续InitialDelaySeconds后, 才会开始进行实际probe动作
+	// 注意容器Running State并不是指的Container启动成功, 而是开始启动
 	if int32(time.Since(c.State.Running.StartedAt.Time).Seconds()) < w.spec.InitialDelaySeconds {
 		return true
 	}

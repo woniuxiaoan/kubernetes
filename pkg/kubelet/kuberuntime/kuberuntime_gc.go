@@ -316,6 +316,7 @@ func (cgc *containerGC) evictSandboxes(evictTerminatedPods bool) error {
 		sort.Sort(sandboxByCreated(sandboxesByPod[uid]))
 	}
 
+	// 删除的sandbox都是 State != runtimeapi.PodSandboxState_SANDBOX_READY && 没有对应的container
 	for podUID, sandboxes := range sandboxesByPod {
 		//如果某个Pod状态满足如下条件，则删除该Pod中所有状态非active的sandboxs
 		if cgc.podStateProvider.IsPodDeleted(podUID) || (cgc.podStateProvider.IsPodTerminated(podUID) && evictTerminatedPods) {
@@ -336,6 +337,7 @@ func (cgc *containerGC) evictSandboxes(evictTerminatedPods bool) error {
 // are evictable if there are no corresponding pods.
 // 如果该Pod已经被删除,则删除/var/log/pods下对应文件夹下的所有文件
 // pods下的目录名称都是pod的uid
+// 遍历/var/log/pods目录, 根据目录名称找到对用pod的uid, 然后查找该pod的状态, 如果该Pod已经被删除, 则删除该Pod对应文件夹的所有文件
 func (cgc *containerGC) evictPodLogsDirectories(allSourcesReady bool) error {
 	osInterface := cgc.manager.osInterface
 	if allSourcesReady {
