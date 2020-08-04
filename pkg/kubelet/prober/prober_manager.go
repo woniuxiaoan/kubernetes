@@ -142,6 +142,8 @@ func (m *manager) AddPod(pod *v1.Pod) {
 					format.Pod(pod), c.Name)
 				return
 			}
+			// 可以看出来 container的每一个probe都有一个专门的worker来负责
+			// 所以可以知道
 			w := newWorker(m, readiness, pod, c)
 			m.workers[key] = w
 			go w.run()

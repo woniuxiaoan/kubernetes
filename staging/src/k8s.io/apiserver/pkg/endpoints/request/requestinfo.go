@@ -105,6 +105,9 @@ type RequestInfoFactory struct {
 // /api
 // /healthz
 // /
+
+// woooniuzhang path infos
+// 解析出来request各个部分后就可以对此次的请求进行鉴权操作了
 func (r *RequestInfoFactory) NewRequestInfo(req *http.Request) (*RequestInfo, error) {
 	// start with a non-resource request until proven otherwise
 	requestInfo := RequestInfo{
@@ -113,25 +116,37 @@ func (r *RequestInfoFactory) NewRequestInfo(req *http.Request) (*RequestInfo, er
 		Verb:              strings.ToLower(req.Method),
 	}
 
+	// 除去首尾"/", 并用"/" splite
 	currentParts := splitPath(req.URL.Path)
+
+	// 例如 /api/v1, /apis/extension/
+	// url的起始格式有两种 /api/{core_api_version}  或者 /apis/{api_group}
 	if len(currentParts) < 3 {
 		// return a non-resource request
 		return &requestInfo, nil
 	}
 
+	// 判断是否以api 或者 apis 开头, 如果不是则返回
 	if !r.APIPrefixes.Has(currentParts[0]) {
 		// return a non-resource request
 		return &requestInfo, nil
 	}
+
+	// 设定APIPrefix = api或者apis
 	requestInfo.APIPrefix = currentParts[0]
 	currentParts = currentParts[1:]
 
+	// 判断APIPrefix是否有对应的Group
+	// 因为核心api只有api_version, 并没有api_group, 所以用来判断
+	// 注意api是没有group的,所以下面逻辑只是为了找到apis形式下的group
 	if !r.GrouplessAPIPrefixes.Has(requestInfo.APIPrefix) {
 		// one part (APIPrefix) has already been consumed, so this is actually "do we have four parts?"
+		// 非GroupLessApi, 此时情况例如:  /apis/[extension, v1beta1]
 		if len(currentParts) < 3 {
 			// return a non-resource request
 			return &requestInfo, nil
 		}
+
 
 		requestInfo.APIGroup = currentParts[0]
 		currentParts = currentParts[1:]
@@ -141,7 +156,10 @@ func (r *RequestInfoFactory) NewRequestInfo(req *http.Request) (*RequestInfo, er
 	requestInfo.APIVersion = currentParts[0]
 	currentParts = currentParts[1:]
 
+	// 至此APIPrefix、APIGroup、APIVersion都已匹配完毕
 	// handle input of form /{specialVerb}/*
+	// 针对 /apis/extension/v1beta1/[watch、namespaces、ivanka、deployments]
+	// 所以 /api/v1/watch/namespaces/ivanka/pods?watch=yes 等价于 /api/v1/watch/namespaces/ivanka/pods
 	if specialVerbs.Has(currentParts[0]) {
 		if len(currentParts) < 2 {
 			return &requestInfo, fmt.Errorf("unable to determine kind and namespace from url, %v", req.URL)
@@ -186,6 +204,7 @@ func (r *RequestInfoFactory) NewRequestInfo(req *http.Request) (*RequestInfo, er
 	requestInfo.Parts = currentParts
 
 	// parts look like: resource/resourceName/subresource/other/stuff/we/don't/interpret
+	// 匹配此次请求的资源类型Resource, 资源名称Name, 子资源名称Subresource
 	switch {
 	case len(requestInfo.Parts) >= 3 && !specialVerbsNoSubresources.Has(requestInfo.Verb):
 		requestInfo.Subresource = requestInfo.Parts[2]
@@ -198,6 +217,8 @@ func (r *RequestInfoFactory) NewRequestInfo(req *http.Request) (*RequestInfo, er
 	}
 
 	// if there's no name on the request and we thought it was a get before, then the actual verb is a list or a watch
+	// apiserver通过Name和Verb来确定最终的动作是list还是 watch
+	// 如果没有设定资源名,且Verb为get,那么最终Verb不是list就是watch, 如果有watch的query且值 != false && != 0 则就为watch, 否则就为list
 	if len(requestInfo.Name) == 0 && requestInfo.Verb == "get" {
 		// Assumes v1.ListOptions
 		// Any query value that is not 0 or false is considered true

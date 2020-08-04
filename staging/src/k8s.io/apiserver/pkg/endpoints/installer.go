@@ -606,6 +606,8 @@ func (a *APIInstaller) registerResourceHandlers(path string, storage rest.Storag
 			}
 			addParams(route, action.Params)
 			routes = append(routes, route)
+		//针对某种资源的list or watch的查询都会走到此分支来, 也就是说list, watch服务的入口是同一个
+		//在API接口中是通过 GET /pods?watch=true 这种方式来区分是list还是watch
 		case "LIST": // List all resources of a kind.
 			doc := "list objects of kind " + kind
 			if hasSubresource {

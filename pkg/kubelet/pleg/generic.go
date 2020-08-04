@@ -213,7 +213,7 @@ func (g *GenericPLEG) relist() {
 		for _, container := range allContainers {
 			events := computeEvents(oldPod, pod, &container.ID)
 			for _, e := range events {
-				updateEvents(eventsByPodID, e)
+				updateEvents(eventsByPodID, e)f
 			}
 		}
 	}

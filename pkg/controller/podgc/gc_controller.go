@@ -92,18 +92,24 @@ func (gcc *PodGCController) gc() {
 		return
 	}
 	if gcc.terminatedPodThreshold > 0 {
+		//删除超出额度的状态为PodSucceed或者PodFailed的Pods
 		gcc.gcTerminated(pods)
 	}
+
+	//删除所绑node节点不存在的Pod
 	gcc.gcOrphaned(pods)
+
 	gcc.gcUnscheduledTerminating(pods)
 }
 
+// PodSucceed、PodFailed状态的Pod可以被称为Terminated.
 func isPodTerminated(pod *v1.Pod) bool {
 	if phase := pod.Status.Phase; phase != v1.PodPending && phase != v1.PodRunning && phase != v1.PodUnknown {
 		return true
 	}
 	return false
 }
+
 
 func (gcc *PodGCController) gcTerminated(pods []*v1.Pod) {
 	terminatedPods := []*v1.Pod{}

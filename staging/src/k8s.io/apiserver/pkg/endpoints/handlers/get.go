@@ -162,11 +162,13 @@ func getRequestOptions(req *http.Request, scope RequestScope, into runtime.Objec
 	return scope.ParameterCodec.DecodeParameters(query, scope.Kind.GroupVersion(), into)
 }
 
+//针对某类资源的list or watch的操作, 例如 GET /api/v1/pods?watch=true最终都会走到该函数中, 所以这是apiserver中必须要理解的一个函数逻辑.
 func ListResource(r rest.Lister, rw rest.Watcher, scope RequestScope, forceWatch bool, minRequestTimeout time.Duration) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		// For performance tracking purposes.
 		trace := utiltrace.New("List " + req.URL.Path)
 
+		// 从请求的URL中拿到此次请求的目的namespace
 		namespace, err := scope.Namer.Namespace(req)
 		if err != nil {
 			scope.err(err, w, req)
@@ -237,6 +239,7 @@ func ListResource(r rest.Lister, rw rest.Watcher, scope RequestScope, forceWatch
 			}
 			glog.V(2).Infof("Starting watch for %s, rv=%s labels=%s fields=%s timeout=%s", req.URL.Path, opts.ResourceVersion, opts.LabelSelector, opts.FieldSelector, timeout)
 
+			//可以知道每一个watch的url请求过来,都会调用rw.Watch创建一个watcher. 需要注意watcher的生命周期是每个http请求的, 这一点很重要.
 			watcher, err := rw.Watch(ctx, &opts)
 			if err != nil {
 				scope.err(err, w, req)

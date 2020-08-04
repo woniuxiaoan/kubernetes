@@ -608,7 +608,11 @@ func (s *SchedulerServer) Run(stop chan struct{}) error {
 	}
 
 	// If leader election is enabled, run via LeaderElector until done and exit.
+<<<<<<< HEAD
 	// 从上面可以看出, 及时不是leader的实例, 其podInformer在竞选前也已经开始同步Pod了
+=======
+	// 如果开启了LeaderElection, 则需要进行Leader选举, 否则多个实例每个都会生效
+>>>>>>> fd4c4f9bdaed8e5aaef968091ed6490559e99679
 	if s.LeaderElection != nil {
 		s.LeaderElection.Callbacks = leaderelection.LeaderCallbacks{
 			OnStartedLeading: run,

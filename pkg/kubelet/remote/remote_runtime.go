@@ -79,6 +79,7 @@ func (r *RemoteRuntimeService) Version(apiVersion string) (*runtimeapi.VersionRe
 
 // RunPodSandbox creates and starts a pod-level sandbox. Runtimes should ensure
 // the sandbox is in ready state.
+// woooniuzhang 创建sandbox
 func (r *RemoteRuntimeService) RunPodSandbox(config *runtimeapi.PodSandboxConfig) (string, error) {
 	// Use 2 times longer timeout for sandbox operation (4 mins by default)
 	// TODO: Make the pod sandbox timeout configurable.

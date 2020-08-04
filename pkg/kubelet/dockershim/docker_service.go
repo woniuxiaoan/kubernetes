@@ -356,6 +356,7 @@ func (ds *dockerService) UpdateRuntimeConfig(_ context.Context, r *runtimeapi.Up
 // GetNetNS returns the network namespace of the given containerID. The ID
 // supplied is typically the ID of a pod sandbox. This getter doesn't try
 // to map non-sandbox IDs to their respective sandboxes.
+// 根据podSandboxID 获取其所在的network namespace的path, 其内部还是通过调用dockerd daemon的http接口实现
 func (ds *dockerService) GetNetNS(podSandboxID string) (string, error) {
 	r, err := ds.client.InspectContainer(podSandboxID)
 	if err != nil {

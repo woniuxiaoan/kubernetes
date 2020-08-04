@@ -568,6 +568,7 @@ func (m *kubeGenericRuntimeManager) computePodActions(pod *v1.Pod, podStatus *ku
 // 后续对Pod的处理都是在该逻辑中进行的，包括创建sandbox、business container
 // sandbox即 pause容器, 用来hold住该Pod网络，以供其他待创建的container在创建时直接加入到该网络中
 // 本函数暂只针对创建Pod逻辑进行注释
+// woooniuzhang kubelet操作Pod
 func (m *kubeGenericRuntimeManager) SyncPod(pod *v1.Pod, _ v1.PodStatus, podStatus *kubecontainer.PodStatus, pullSecrets []v1.Secret, backOff *flowcontrol.Backoff) (result kubecontainer.PodSyncResult) {
 	// Step 1: Compute sandbox and container changes.
 	// 拿到Pod描述后先确定需要对Pod做什么操作

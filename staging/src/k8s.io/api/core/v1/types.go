@@ -2372,6 +2372,7 @@ type ContainerStateTerminated struct {
 // ContainerState holds a possible state of container.
 // Only one of its members may be specified.
 // If none of them is specified, the default one is ContainerStateWaiting.
+// woooniuzhang pod状态  container都有哪些状态
 type ContainerState struct {
 	// Details about a waiting container
 	// +optional
@@ -2416,7 +2417,7 @@ type ContainerStatus struct {
 // PodPhase is a label for the condition of a pod at the current time.
 type PodPhase string
 
-// These are the valid statuses of pods.
+// PodPending与PodRunning互补
 const (
 	// PodPending means the pod has been accepted by the system, but one or more of the containers
 	// has not been started. This includes time before being bound to a node, as well as time spent

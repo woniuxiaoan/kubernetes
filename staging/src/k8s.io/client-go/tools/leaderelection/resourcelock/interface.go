@@ -35,9 +35,13 @@ const (
 // with a random string (e.g. UUID) with only slight modification of this code.
 // TODO(mikedanese): this should potentially be versioned
 type LeaderElectionRecord struct {
+	//当前锁拥有者的标示符
 	HolderIdentity       string      `json:"holderIdentity"`
+	//租约时间,即每次所得锁的有效时间,如果超过这个时间没有没有刷新租约的话该锁就会失效, 别的实例就会重新获取锁
 	LeaseDurationSeconds int         `json:"leaseDurationSeconds"`
+	//申请锁的时间
 	AcquireTime          metav1.Time `json:"acquireTime"`
+	//锁刷新的时间
 	RenewTime            metav1.Time `json:"renewTime"`
 	LeaderTransitions    int         `json:"leaderTransitions"`
 }
@@ -76,6 +80,7 @@ type Interface interface {
 }
 
 // Manufacture will create a lock of a given type according to the input parameters
+// 创建锁, 暂只支持endpoint、configmap两种资源类型
 func New(lockType string, ns string, name string, client corev1.CoreV1Interface, rlc ResourceLockConfig) (Interface, error) {
 	switch lockType {
 	case EndpointsResourceLock:

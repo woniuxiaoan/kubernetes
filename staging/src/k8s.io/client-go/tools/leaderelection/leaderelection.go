@@ -84,6 +84,8 @@ func NewLeaderElector(lec LeaderElectionConfig) (*LeaderElector, error) {
 
 type LeaderElectionConfig struct {
 	// Lock is the resource that will be used for locking
+	// leaderElection是利用lock实现的, 其实就可以理解为获取分布式锁的过程
+	// lock的实现方式有两种: configMap, endpoint。 大体过程就是没有则创建
 	Lock rl.Interface
 
 	// LeaseDuration is the duration that non-leader candidates will
@@ -140,13 +142,32 @@ func (le *LeaderElector) Run() {
 		runtime.HandleCrash()
 		le.config.Callbacks.OnStoppedLeading()
 	}()
+<<<<<<< HEAD
 	
 	//acquire为一个获取leader的循环, 知道获取leader成功才会返回
+=======
+
+	// 该过程是block的, 即会一直循环, 直至成功拿到锁, 函数才会退出
+>>>>>>> fd4c4f9bdaed8e5aaef968091ed6490559e99679
 	le.acquire()
+
 	stop := make(chan struct{})
+<<<<<<< HEAD
 	//只有竞选leader成功的实例才会执行callbacks, 然后定期去renew自己的任期
 	go le.config.Callbacks.OnStartedLeading(stop)
 	//renew成功的实例是一直在这里循环, 直到renew失败
+=======
+
+	// 以goroutine方式运行OnStartedLeading函数, scheduler中该函数为run, 即真正的调度程序
+	go le.config.Callbacks.OnStartedLeading(stop)
+
+	// 以阻塞的方式定期进行renew, 如果renew失败, 则该函数结束, stop就会被关闭
+	// 此时OnStartedLeading函数就会退出, 针对kube-scheduler就是调度器退出了
+	// 之后的重启操作就是systemctl的事情了.
+	
+	// 所以需要注意的一点是, renew失败后程序并不会再次尝试acquire锁了, 所以此时如果程序不退出
+	// 那么该实例就会一直处在不可用状态了.
+>>>>>>> fd4c4f9bdaed8e5aaef968091ed6490559e99679
 	le.renew()
 	close(stop)
 }
@@ -177,6 +198,10 @@ func (le *LeaderElector) acquire() {
 	stop := make(chan struct{})
 	desc := le.config.Lock.Describe()
 	glog.Infof("attempting to acquire leader lease  %v...", desc)
+
+	//会每隔RetryPeriod seconds运行一次func, 直到stop closed
+	//下面的逻辑就是在acquire获取锁时, 如果获取失败则会一直停留在此, 直至成功获取锁, close stop, JitterUntil退出
+	//acquire包含两个含义: 没有获得锁则获取锁, 获得了锁则定时Renew
 	wait.JitterUntil(func() {
 		succeeded := le.tryAcquireOrRenew()
 		le.maybeReportTransition()
@@ -187,12 +212,15 @@ func (le *LeaderElector) acquire() {
 		le.config.Lock.RecordEvent("became leader")
 		glog.Infof("successfully acquired lease %v", desc)
 		close(stop)
+		//每隔RetryPeriod seconds运行一次func
 	}, le.config.RetryPeriod, JitterFactor, true, stop)
 }
 
 // renew loops calling tryAcquireOrRenew and returns immediately when tryAcquireOrRenew fails.
 func (le *LeaderElector) renew() {
 	stop := make(chan struct{})
+
+	// Until loops until stop channel is closed, running f every period.
 	wait.Until(func() {
 		err := wait.Poll(le.config.RetryPeriod, le.config.RenewDeadline, func() (bool, error) {
 			return le.tryAcquireOrRenew(), nil
@@ -205,6 +233,7 @@ func (le *LeaderElector) renew() {
 		}
 		le.config.Lock.RecordEvent("stopped leading")
 		glog.Infof("failed to renew lease %v: %v", desc, err)
+		// 如果renew失败则关闭stop channel, wait.Until就会退出, 即renew就会结束
 		close(stop)
 	}, 0, stop)
 }
@@ -212,6 +241,7 @@ func (le *LeaderElector) renew() {
 // tryAcquireOrRenew tries to acquire a leader lease if it is not already acquired,
 // else it tries to renew the lease if it has already been acquired. Returns true
 // on success else returns false.
+// 尝试获取锁或者renew锁
 func (le *LeaderElector) tryAcquireOrRenew() bool {
 	now := metav1.Now()
 	leaderElectionRecord := rl.LeaderElectionRecord{
@@ -222,26 +252,36 @@ func (le *LeaderElector) tryAcquireOrRenew() bool {
 	}
 
 	// 1. obtain or create the ElectionRecord
+	// 从client中获取指定名称的资源, 没有则尝试以创建方式获取锁, 有则尝试以更新方式获取锁
 	oldLeaderElectionRecord, err := le.config.Lock.Get()
 	if err != nil {
 		if !errors.IsNotFound(err) {
 			glog.Errorf("error retrieving resource lock %v: %v", le.config.Lock.Describe(), err)
 			return false
 		}
+
+		// 即如果没有找到, 则尝试创建, 创建成功即标识获得锁, 成为master节点
 		if err = le.config.Lock.Create(leaderElectionRecord); err != nil {
 			glog.Errorf("error initially creating leader election record: %v", err)
 			return false
 		}
+
+		// 更新自己所记录的leaderElectionRecord内容
 		le.observedRecord = leaderElectionRecord
 		le.observedTime = time.Now()
 		return true
 	}
 
 	// 2. Record obtained, check the Identity & Time
+	// 确保本地observedRecord是当前锁的record
 	if !reflect.DeepEqual(le.observedRecord, *oldLeaderElectionRecord) {
 		le.observedRecord = *oldLeaderElectionRecord
 		le.observedTime = time.Now()
 	}
+
+	// 如果该锁租期还没有到 & 该锁拥有者不是自己, 则获取锁失败
+	// 为什么不是 oldLeaderElectionRecord.RenewTime.Add(time.Duration(oldLeaderElectionRecord.LeaseDurationSeconds) * time.Second).After(now.Time) ??
+	// 也就是说多个worker的leaseDuration需要保持一样?
 	if le.observedTime.Add(le.config.LeaseDuration).After(now.Time) &&
 		oldLeaderElectionRecord.HolderIdentity != le.config.Lock.Identity() {
 		glog.V(4).Infof("lock is held by %v and has not yet expired", oldLeaderElectionRecord.HolderIdentity)
@@ -250,6 +290,7 @@ func (le *LeaderElector) tryAcquireOrRenew() bool {
 
 	// 3. We're going to try to update. The leaderElectionRecord is set to it's default
 	// here. Let's correct it before updating.
+	// 所以当leader实例发生变动时, LeaderTransitions数值才会变动
 	if oldLeaderElectionRecord.HolderIdentity == le.config.Lock.Identity() {
 		leaderElectionRecord.AcquireTime = oldLeaderElectionRecord.AcquireTime
 		leaderElectionRecord.LeaderTransitions = oldLeaderElectionRecord.LeaderTransitions
@@ -258,10 +299,13 @@ func (le *LeaderElector) tryAcquireOrRenew() bool {
 	}
 
 	// update the lock itself
+	// 即如果已有master没有及时renew lock, 那么该实例就可以更新该实例, 更新成功即标识着获得锁.
 	if err = le.config.Lock.Update(leaderElectionRecord); err != nil {
 		glog.Errorf("Failed to update lock: %v", err)
 		return false
 	}
+
+	// 成功获取锁后(更新方式获取), 更新本地元数据
 	le.observedRecord = leaderElectionRecord
 	le.observedTime = time.Now()
 	return true

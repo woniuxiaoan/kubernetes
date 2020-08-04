@@ -35,6 +35,7 @@ func New(auth authenticator.Token) *Authenticator {
 
 var invalidToken = errors.New("invalid bearer token")
 
+// woooniuzhang bearer token
 func (a *Authenticator) AuthenticateRequest(req *http.Request) (user.Info, bool, error) {
 	auth := strings.TrimSpace(req.Header.Get("Authorization"))
 	if auth == "" {
