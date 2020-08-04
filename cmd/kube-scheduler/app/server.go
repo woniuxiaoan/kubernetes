@@ -608,6 +608,7 @@ func (s *SchedulerServer) Run(stop chan struct{}) error {
 	}
 
 	// If leader election is enabled, run via LeaderElector until done and exit.
+	// 从上面可以看出, 及时不是leader的实例, 其podInformer在竞选前也已经开始同步Pod了
 	if s.LeaderElection != nil {
 		s.LeaderElection.Callbacks = leaderelection.LeaderCallbacks{
 			OnStartedLeading: run,
@@ -620,6 +621,8 @@ func (s *SchedulerServer) Run(stop chan struct{}) error {
 			return fmt.Errorf("couldn't create leader elector: %v", err)
 		}
 
+		//竞选leader失败的实例会一直循环在这里, 执行竞选leader的操作
+		//竞选leader成功的实例也会一直循环在这里, 刷新自己的任期, 如果刷新失败则该函数return, 整个kube-scheduler就退出了.
 		leaderElector.Run()
 
 		return fmt.Errorf("lost lease")

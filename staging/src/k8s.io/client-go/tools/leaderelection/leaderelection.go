@@ -140,9 +140,13 @@ func (le *LeaderElector) Run() {
 		runtime.HandleCrash()
 		le.config.Callbacks.OnStoppedLeading()
 	}()
+	
+	//acquire为一个获取leader的循环, 知道获取leader成功才会返回
 	le.acquire()
 	stop := make(chan struct{})
+	//只有竞选leader成功的实例才会执行callbacks, 然后定期去renew自己的任期
 	go le.config.Callbacks.OnStartedLeading(stop)
+	//renew成功的实例是一直在这里循环, 直到renew失败
 	le.renew()
 	close(stop)
 }
