@@ -157,12 +157,15 @@ type Cacher struct {
 
 	// Underlying storage.Interface.
 	// storage是连接etcd的, 也就是背后的裸存储
+	// 针对某种资源的改动操作(Create,Delete,Update)是直接通过storage操作裸存储实现的
 	storage Interface
 
 	// Expected type of objects in the underlying cache.
 	objectType reflect.Type
 
 	// "sliding window" of recent changes of objects and the current state.
+	// 环形缓存+ThreadSaftMap
+	// 针对某种资源的查询操作(Get, List)是通过watchCache实现的
 	watchCache *watchCache
 	reflector  *cache.Reflector
 
