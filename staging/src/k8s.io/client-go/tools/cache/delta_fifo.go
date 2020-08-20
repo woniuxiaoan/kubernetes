@@ -470,10 +470,9 @@ func (f *DeltaFIFO) Pop(process PopProcessFunc) (interface{}, error) {
 		delete(f.items, id)
 
 		//处理本次Pop的item，这个是初始化时注册进去的。
-		//当我们创建
 		err := process(item)
 
-		//HandlerDelta处理出错, 返回重新入队错误的话，则重新入队
+		//HandlerDelta处理出错, 如果需要将该obj重新入队, 则返回ErrRequeue即可
 		if e, ok := err.(ErrRequeue); ok {
 			f.addIfNotPresent(id, item)
 			err = e.Err

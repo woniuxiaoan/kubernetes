@@ -62,6 +62,8 @@ func (w *realTimeoutFactory) TimeoutCh() (<-chan time.Time, func() bool) {
 
 // serveWatch handles serving requests to the server
 // TODO: the functionality in this method and in WatchServer.Serve is not cleanly decoupled.
+// 参数watcher的实现类型是cacheWatcher
+// 即k8s.io/apiserver/pkg/storage/cacher.go line 362 利用newCacheWatcher创建的watcher
 func serveWatch(watcher watch.Interface, scope RequestScope, req *http.Request, w http.ResponseWriter, timeout time.Duration) {
 	// negotiate for the stream serializer
 	serializer, err := negotiation.NegotiateOutputStreamSerializer(req, scope.Serializer)

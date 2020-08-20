@@ -132,6 +132,9 @@ func (c LegacyRESTStorageProvider) NewLegacyRESTStorage(restOptionsGetter generi
 		return LegacyRESTStorage{}, genericapiserver.APIGroupInfo{}, err
 	}
 
+	//podStorage最终所有的method其实为genericregistry.Store所拥有的method 所以podStorage可以进行像,
+	//`lister, isLister := storage.(rest.Lister)`, `lister, isLister := storage.(rest.Lister)`之类的操作
+	//genericregistry.Store.Storage其实为cacher, 它的初始化是利用store.CompleteWithOptions完成的.
 	podStorage := podstore.NewStorage(
 		restOptionsGetter,
 		nodeStorage.KubeletConnectionInfo,

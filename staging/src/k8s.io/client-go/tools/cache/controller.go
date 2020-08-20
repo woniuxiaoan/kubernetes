@@ -98,12 +98,15 @@ func New(c *Config) Controller {
 // It's an error to call Run more than once.
 // Run blocks; call via go.
 // 这是一个死循环，controller是连接reflector，deltafifo， localstore的关键。
+// woooniuzhang informer启动入口
 func (c *controller) Run(stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
 	go func() {
 		<-stopCh
 		c.config.Queue.Close()
 	}()
+
+	// NewReflector功能就是实现listAndWatch机制
 	r := NewReflector(
 		c.config.ListerWatcher,
 		c.config.ObjectType,
@@ -150,6 +153,8 @@ func (c *controller) LastSyncResourceVersion() string {
 // also be helpful.
 func (c *controller) processLoop() {
 	for {
+		// err 有两类错误, 一个是FIFOClosedError, 该错误为Pop本身产生的错误
+		// 其他为PopProcessFunc函数返回的错误.
 		obj, err := c.config.Queue.Pop(PopProcessFunc(c.config.Process))
 		if err != nil {
 			if err == FIFOClosedError {

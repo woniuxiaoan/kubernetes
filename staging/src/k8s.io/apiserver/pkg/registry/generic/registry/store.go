@@ -391,6 +391,11 @@ func (e *Store) WaitForInitialized(ctx genericapirequest.Context, obj runtime.Ob
 		return nil, err
 	}
 	qualifiedResource := e.qualifiedResourceFromContext(ctx)
+
+	//实现带有该参数Watch函数的结构体只有两种
+	//1. k8s.io/apiserver/pkg/storage.Cacher
+	//2. k8s.ip/apiserver/pkg/storage/etcd3.store
+	//所以e.Storage的implement要么是Cacher, 要么是store
 	w, err := e.Storage.Watch(ctx, key, accessor.GetResourceVersion(), storage.SelectionPredicate{
 		Label: labels.Everything(),
 		Field: fields.Everything(),
@@ -1153,6 +1158,7 @@ func (e *Store) Watch(ctx genericapirequest.Context, options *metainternalversio
 	return e.WatchPredicate(ctx, predicate, resourceVersion)
 }
 
+
 // WatchPredicate starts a watch for the items that matches.
 func (e *Store) WatchPredicate(ctx genericapirequest.Context, p storage.SelectionPredicate, resourceVersion string) (watch.Interface, error) {
 	if name, ok := p.MatchesSingle(); ok {
@@ -1358,6 +1364,10 @@ func (e *Store) CompleteWithOptions(options *generic.StoreOptions) error {
 		}
 	}
 
+	// woooniuzhang apiserver cacher相关
+	// Decorator其实就是genericregistry.StorageWithCacher(cacheSize)
+	// 可在k8s.io/apiserver/pkg/server/options, line255查看
+	// 所以可以知道e.Storage其实就是cacher
 	if e.Storage == nil {
 		e.Storage, e.DestroyFunc = opts.Decorator(
 			opts.StorageConfig,

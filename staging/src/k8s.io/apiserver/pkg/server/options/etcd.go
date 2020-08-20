@@ -213,6 +213,8 @@ func (f *SimpleRestOptionsFactory) GetRESTOptions(resource schema.GroupResource)
 		if !ok {
 			cacheSize = f.Options.DefaultWatchCacheSize
 		}
+		// 即如果enable了watch功能的话, StorageWithCacher会创建一个基于Cacher结构的存储.
+		// woooniuzhang 创建cacher的入口, important
 		ret.Decorator = genericregistry.StorageWithCacher(cacheSize)
 	}
 	return ret, nil
@@ -246,6 +248,10 @@ func (f *storageFactoryRestOptionsFactory) GetRESTOptions(resource schema.GroupR
 		if !ok {
 			cacheSize = f.Options.DefaultWatchCacheSize
 		}
+		// 注意这里的Decorator就是store.CompleteWithOptions里面用于初始化e.Storage的opts.Decorator
+		// 返回的ret参数其实就是store.CompleteWithOptions函数的参数options
+		// Decorator其实就是genericregistry.StorageWithCacher(cacheSize)
+		// 可在k8s.io/apiserver/pkg/server/options, line255查看
 		ret.Decorator = genericregistry.StorageWithCacher(cacheSize)
 	}
 

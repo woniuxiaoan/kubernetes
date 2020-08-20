@@ -84,6 +84,9 @@ func (s set) delete(item t) {
 }
 
 // Add marks item as needing processing.
+// dirty为set, 不重复的存放所有需要被处理的key
+// processing为set, 存放所有正在被处理的key
+// queue的key都存在于dirty中, 而不存在于processing中
 func (q *Type) Add(item interface{}) {
 	q.cond.L.Lock()
 	defer q.cond.L.Unlock()
@@ -148,6 +151,9 @@ func (q *Type) Done(item interface{}) {
 	q.metrics.done(item)
 
 	q.processing.delete(item)
+
+	//例如正在处理ivanka/ivankaqrain时, 又进来了一个ivanka/ivankaqrain key, 此时该key会存在于dirty中还没有进入queue中
+	//当第一个处理完后, 就满足了该条件。当第一个处理完后, 该key就会被复制到queue中,从而被下次的Get获取, 再次进行处理.
 	if q.dirty.has(item) {
 		q.queue = append(q.queue, item)
 		q.cond.Signal()

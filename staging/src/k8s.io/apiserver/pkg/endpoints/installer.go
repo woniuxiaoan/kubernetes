@@ -186,6 +186,10 @@ func (a *APIInstaller) restMapping(resource string) (*meta.RESTMapping, error) {
 	return a.group.Mapper.RESTMapping(fqKindToRegister.GroupKind(), fqKindToRegister.Version)
 }
 
+// 注册某个路径
+// pkg/registry/core/rest/storage_core.go中的 restStorageMap, path为key storage为value
+// storage的implement为k8s.io/apiserver/pkg/registry/generic/registry.Store，该Store实现了众多的interface
+// 包括rest.Lister, rest.Watcher, rest.Getter等
 func (a *APIInstaller) registerResourceHandlers(path string, storage rest.Storage, ws *restful.WebService) (*metav1.APIResource, error) {
 	admit := a.group.Admit
 	context := a.group.Context
@@ -613,6 +617,8 @@ func (a *APIInstaller) registerResourceHandlers(path string, storage rest.Storag
 			if hasSubresource {
 				doc = "list " + subresource + " of objects of kind " + kind
 			}
+
+			// lister, watcher它的实现其实都是k8s.io/apiserver/pkg/registry/generic/registry.Store
 			handler := metrics.InstrumentRouteFunc(action.Verb, resource, subresource, requestScope, restfulListResource(lister, watcher, reqScope, false, a.minRequestTimeout))
 			if a.enableAPIResponseCompression {
 				handler = genericfilters.RestfulWithCompression(handler, a.group.Context)
@@ -1012,6 +1018,7 @@ func isVowel(c rune) bool {
 	return false
 }
 
+// woooniuzhang 下面为不同动作(list,watch,patch,update,get)所对应的不同handler
 func restfulListResource(r rest.Lister, rw rest.Watcher, scope handlers.RequestScope, forceWatch bool, minRequestTimeout time.Duration) restful.RouteFunction {
 	return func(req *restful.Request, res *restful.Response) {
 		handlers.ListResource(r, rw, scope, forceWatch, minRequestTimeout)(res.ResponseWriter, req.Request)

@@ -154,7 +154,7 @@ func newWatchCache(
 		cache:           make([]watchCacheElement, capacity),
 		startIndex:      0,
 		endIndex:        0,
-		store:           cache.NewStore(storeElementKey),
+		store:           cache.NewStore(storeElementKey), // 底层为thread_saft_map + 索引, 和 informer的localStorage是一样的
 		resourceVersion: 0,
 		clock:           clock.RealClock{},
 	}
@@ -222,6 +222,7 @@ func parseResourceVersion(resourceVersion string) (uint64, error) {
 	return strconv.ParseUint(resourceVersion, 10, 0)
 }
 
+//
 func (w *watchCache) processEvent(event watch.Event, resourceVersion uint64, updateFunc func(*storeElement) error) error {
 	key, err := w.keyFunc(event.Object)
 	if err != nil {
@@ -233,6 +234,7 @@ func (w *watchCache) processEvent(event watch.Event, resourceVersion uint64, upd
 		return err
 	}
 
+	//将watch.Event封装为一个watchCacheEvent
 	watchCacheEvent := &watchCacheEvent{
 		Type:             event.Type,
 		Object:           elem.Object,
@@ -267,6 +269,8 @@ func (w *watchCache) processEvent(event watch.Event, resourceVersion uint64, upd
 	if w.onEvent != nil {
 		w.onEvent(watchCacheEvent)
 	}
+
+	// 更新cacher的环形内存内容及resourceVersion
 	w.updateCache(resourceVersion, watchCacheEvent)
 	w.resourceVersion = resourceVersion
 	w.cond.Broadcast()

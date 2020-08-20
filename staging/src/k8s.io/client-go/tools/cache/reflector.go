@@ -56,7 +56,8 @@ type Reflector struct {
 	// listwatch的对象类型，比如我们创建的deployment informer，那么这个类型就是deployment
 	expectedType reflect.Type
 	// The destination to sync up with the watch source
-	// 就是DeltaFIFO
+	// informer时, implement就是DeltaFIFO
+	// 针对apiserver, store的implement就是 watchCache
 	store Store
 	// listerWatcher is used to perform lists and watches.
 	listerWatcher ListerWatcher

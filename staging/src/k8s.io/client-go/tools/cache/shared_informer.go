@@ -71,6 +71,7 @@ type SharedIndexInformer interface {
 }
 
 // NewSharedInformer creates a new instance for the listwatcher.
+// listerWatcher是数据来源, 可以理解为informer的数据都是从listerWatcher中获取的.
 func NewSharedInformer(lw ListerWatcher, objType runtime.Object, resyncPeriod time.Duration) SharedInformer {
 	return NewSharedIndexInformer(lw, objType, resyncPeriod, Indexers{})
 }
@@ -125,7 +126,7 @@ func WaitForCacheSync(stopCh <-chan struct{}, cacheSyncs ...InformerSynced) bool
 }
 
 type sharedIndexInformer struct {
-	indexer    Indexer
+	indexer    Indexer  // 变量名感觉不太正确, 叫store更为合适吧？
 	controller Controller
 
 	processor             *sharedProcessor
@@ -198,7 +199,7 @@ func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
 		ListerWatcher:    s.listerWatcher,
 		ObjectType:       s.objectType,
 		FullResyncPeriod: s.resyncCheckPeriod,
-		RetryOnError:     false,
+		RetryOnError:     false, // 即Pop出错时, 是否进行requeue操作, 模式false
 		ShouldResync:     s.processor.shouldResync,
 
 		Process: s.HandleDeltas, //设定处理pop出的deltas的函数
@@ -352,6 +353,7 @@ func (s *sharedIndexInformer) AddEventHandlerWithResyncPeriod(handler ResourceEv
 //    b. localStore找到: update localStore, 然后distribute update event
 // 2. delete delta: delete localStore, 然后distribute delete event
 // 综上可得distribute的事件类型是跟着localStore的动作走的.
+// 该函数会在执行queue.Pop的时候被调用
 func (s *sharedIndexInformer) HandleDeltas(obj interface{}) error {
 	s.blockDeltas.Lock()
 	defer s.blockDeltas.Unlock()

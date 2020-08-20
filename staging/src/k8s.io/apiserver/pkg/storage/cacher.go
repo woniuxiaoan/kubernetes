@@ -194,7 +194,7 @@ type Cacher struct {
 // its internal cache and updating its cache in the background based on the
 // given configuration.
 // cacher的创建入口, apiserver中每种类型都有一个对应的cacher(猜测)
-// apiserver listAndWatch入口
+// woooniuzhang apiserver listAndWatch入口
 func NewCacherFromConfig(config CacherConfig) *Cacher {
 	watchCache := newWatchCache(config.CacheCapacity, config.KeyFunc, config.GetAttrsFunc)
 
@@ -212,6 +212,7 @@ func NewCacherFromConfig(config CacherConfig) *Cacher {
 	stopCh := make(chan struct{})
 	cacher := &Cacher{
 		ready:       newReady(),
+		// storage即listerWatcher, 不过其数据来源于etcd
 		storage:     config.Storage,
 		objectType:  reflect.TypeOf(config.Type),
 		//存储组件, 包含一个环形buffer以及一个localStore
@@ -283,6 +284,7 @@ func (c *Cacher) startCaching(stopChannel <-chan struct{}) {
 	// need to retry it on errors under lock.
 	// Also note that startCaching is called in a loop, so there's no need
 	// to have another loop here.
+	// 当listerWatcher
 	if err := c.reflector.ListAndWatch(stopChannel); err != nil {
 		glog.Errorf("unexpected ListAndWatch error: %v", err)
 	}
@@ -818,6 +820,7 @@ func newCacheWatcher(resourceVersion uint64, chanSize int, initEvents []*watchCa
 }
 
 // Implements watch.Interface.
+// 为watch连接创建的server就会从该channel中获取event, 然后以chunked的形式给到client端
 func (c *cacheWatcher) ResultChan() <-chan watch.Event {
 	return c.result
 }
