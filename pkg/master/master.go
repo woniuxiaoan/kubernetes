@@ -403,12 +403,17 @@ type RESTStorageProvider interface {
 func (m *Master) InstallAPIs(apiResourceConfigSource serverstorage.APIResourceConfigSource, restOptionsGetter generic.RESTOptionsGetter, restStorageProviders ...RESTStorageProvider) {
 	apiGroupsInfo := []genericapiserver.APIGroupInfo{}
 
+	//以第0个restStorageBuilder为pkg/registry/apps/rest.RESTStorageProvider为例
 	for _, restStorageBuilder := range restStorageProviders {
+		//groupName = "apps"
 		groupName := restStorageBuilder.GroupName()
 		if !apiResourceConfigSource.AnyVersionForGroupEnabled(groupName) {
 			glog.V(1).Infof("Skipping disabled API group %q.", groupName)
 			continue
 		}
+
+		//每个Group会有多个不同的Version, 例如v1/v1beta1/v1beta2等等
+		//apiGroupInfo里面包含GroupVersion信息, 例如apps/v1beta1
 		apiGroupInfo, enabled := restStorageBuilder.NewRESTStorage(apiResourceConfigSource, restOptionsGetter)
 		if !enabled {
 			glog.Warningf("Problem initializing API group %q, skipping.", groupName)
@@ -427,6 +432,7 @@ func (m *Master) InstallAPIs(apiResourceConfigSource serverstorage.APIResourceCo
 		apiGroupsInfo = append(apiGroupsInfo, apiGroupInfo)
 	}
 
+	//已第0个为apps相关的apiGroupInfo为例, 其GroupVerion = {Group="apps", Version="v1beta1"}
 	for i := range apiGroupsInfo {
 		if err := m.GenericAPIServer.InstallAPIGroup(&apiGroupsInfo[i]); err != nil {
 			glog.Fatalf("Error in registering group versions: %v", err)

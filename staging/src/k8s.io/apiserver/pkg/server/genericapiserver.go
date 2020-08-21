@@ -348,6 +348,18 @@ func (s *GenericAPIServer) installAPIResources(apiPrefix string, apiGroupInfo *A
 			apiGroupVersion.OptionsExternalVersion = apiGroupInfo.OptionsExternalVersion
 		}
 
+		//进行路由注册逻辑,将路由注册进Container中, 已apps/v1beta1为例
+		//apiGroupVersion.GroupVersion = {Group:"apps",Version:"v1beta1"}
+		//apiGroupVersion.Root = APIGroupPrefix, APIGroupPrefix = "/apis"
+		//apiGroupVersion.Storage 存储的为apps/v1beta1条件下的各种资源与其storage的对应关系,结构如下
+		/*
+			deploymentStorage := deploymentstore.NewStorage(restOptionsGetter)
+			apiGroupVersion.Storage = map[string]rest.Storage {
+				"deployments": deploymentStorage.Deployment,
+				"deployments/status": deploymentStorage.Deployment,
+				"deployments/rollback": deploymentStorage.Rollback,
+			}
+		*/
 		if err := apiGroupVersion.InstallREST(s.Handler.GoRestfulContainer); err != nil {
 			return fmt.Errorf("Unable to setup API %v: %v", apiGroupInfo, err)
 		}
@@ -386,6 +398,7 @@ func (s *GenericAPIServer) InstallAPIGroup(apiGroupInfo *APIGroupInfo) error {
 		return fmt.Errorf("cannot register handler with an empty version for %#v", *apiGroupInfo)
 	}
 
+	//以apiGroupInfo为apps group为例, 其GroupVerion = {Group="apps", Version="v1beta1"}
 	if err := s.installAPIResources(APIGroupPrefix, apiGroupInfo); err != nil {
 		return err
 	}
@@ -420,6 +433,9 @@ func (s *GenericAPIServer) InstallAPIGroup(apiGroupInfo *APIGroupInfo) error {
 	return nil
 }
 
+// 一个Group会对应很对Version, 而每个Version中又有不同的资源. 例如apps/v1beta2中就有replicaset, 而apps/v1beta1中就没有
+// storage可以理解为资源的本地缓存, 里面包含有cacher. 也就是讲apiserver为每种不同版本的资源都维护了一个storage
+// 以便减少直接与裸存储(etcd)的交互, 提升apiserver的性能.
 func (s *GenericAPIServer) getAPIGroupVersion(apiGroupInfo *APIGroupInfo, groupVersion schema.GroupVersion, apiPrefix string) *genericapi.APIGroupVersion {
 	storage := make(map[string]rest.Storage)
 	for k, v := range apiGroupInfo.VersionedResourcesStorageMap[groupVersion.Version] {

@@ -83,7 +83,20 @@ type APIGroupVersion struct {
 // InstallREST registers the REST handlers (storage, watch, proxy and redirect) into a restful Container.
 // It is expected that the provided path root prefix will serve all operations. Root MUST NOT end
 // in a slash.
+//进行路由注册逻辑,将路由注册进Container中, 已apps/v1beta1为例
+//apiGroupVersion.GroupVersion = {Group:"apps",Version:"v1beta1"}
+//apiGroupVersion.Root = APIGroupPrefix, APIGroupPrefix = "/apis"
+//apiGroupVersion.Storage存储的为apps/v1beta1条件下的各种资源与其storage的对应关系,结构如下
+/*
+	deploymentStorage := deploymentstore.NewStorage(restOptionsGetter)
+	apiGroupVersion.Storage = map[string]rest.Storage {
+		"deployments": deploymentStorage.Deployment,
+		"deployments/status": deploymentStorage.Deployment,
+		"deployments/rollback": deploymentStorage.Rollback,
+	}
+*/
 func (g *APIGroupVersion) InstallREST(container *restful.Container) error {
+	//prefix = /apis/apps/v1beta1
 	prefix := path.Join(g.Root, g.GroupVersion.Group, g.GroupVersion.Version)
 	installer := &APIInstaller{
 		group:                        g,

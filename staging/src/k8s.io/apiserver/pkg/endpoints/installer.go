@@ -91,20 +91,38 @@ var toDiscoveryKubeVerb = map[string]string{
 }
 
 // Install handlers for API resources.
+// 以apps/v1beta1为例子
 func (a *APIInstaller) Install() ([]metav1.APIResource, *restful.WebService, []error) {
 	var apiResources []metav1.APIResource
 	var errors []error
+	//创建一个新的WebService, 以就是讲apiserver为每个/api/{Version}和/apis/{Group}/{Version}创建了
+	//一个独立的WebService, 一个WebService可以理解为echo框架中的一个分组.
 	ws := a.newWebService()
 
 	// Register the paths in a deterministic (sorted) order to get a deterministic swagger spec.
 	paths := make([]string, len(a.group.Storage))
 	var i int = 0
+
+	/*
+		deploymentStorage := deploymentstore.NewStorage(restOptionsGetter)
+		a.group.Storage = map[string]rest.Storage {
+			"deployments": deploymentStorage.Deployment,
+			"deployments/status": deploymentStorage.Deployment,
+			"deployments/rollback": deploymentStorage.Rollback,
+		}
+	*/
 	for path := range a.group.Storage {
 		paths[i] = path
 		i++
 	}
+
+
 	sort.Strings(paths)
+
+	// path的值就为"deployments", "deployments/status", "deployments/rollback"...
 	for _, path := range paths {
+		// path为某个版本下的资源名, storage为该资源对应的实现创建好的storage
+		// 例如path = "deployments", storage = deploymentStorage.Deployment
 		apiResource, err := a.registerResourceHandlers(path, a.group.Storage[path], ws)
 		if err != nil {
 			errors = append(errors, fmt.Errorf("error in registering resource: %s, %v", path, err))
@@ -172,6 +190,8 @@ func (a *APIInstaller) getResourceKind(path string, storage rest.Storage) (schem
 //      Resource Type:    extensions/v1beta1.ReplicaSet (input args: resource = "replicasets")
 //      Subresource Type: autoscaling/v1.Scale
 //      REST path:        /apis/extensions/v1beta1/namespaces/{namespace}/replicaset/{name}/scale
+
+
 func (a *APIInstaller) restMapping(resource string) (*meta.RESTMapping, error) {
 	// subresources must have parent resources, and follow the namespacing rules of their parent.
 	// So get the storage of the resource (which is the parent resource in case of subresources)
@@ -186,8 +206,10 @@ func (a *APIInstaller) restMapping(resource string) (*meta.RESTMapping, error) {
 	return a.group.Mapper.RESTMapping(fqKindToRegister.GroupKind(), fqKindToRegister.Version)
 }
 
-// 注册某个路径
-// pkg/registry/core/rest/storage_core.go中的 restStorageMap, path为key storage为value
+// 以apps/v1beta1为例
+// path为某个版本下的资源名, storage为该资源对应的事先创建好的storage
+// 例如path = "deployments", storage = deploymentStorage.Deployment, 此时ws的Root=/apis/apps/v1beta1
+
 // storage的implement为k8s.io/apiserver/pkg/registry/generic/registry.Store，该Store实现了众多的interface
 // 包括rest.Lister, rest.Watcher, rest.Getter等
 func (a *APIInstaller) registerResourceHandlers(path string, storage rest.Storage, ws *restful.WebService) (*metav1.APIResource, error) {
@@ -374,6 +396,7 @@ func (a *APIInstaller) registerResourceHandlers(path string, storage rest.Storag
 
 	var apiResource metav1.APIResource
 	// Get the list of actions for the given scope.
+	// 如果这个资源非namespaced, 例如node, 则进此case
 	switch scope.Name() {
 	case meta.RESTScopeNameRoot:
 		// Handle non-namespace scoped resources like nodes.
@@ -420,15 +443,24 @@ func (a *APIInstaller) registerResourceHandlers(path string, storage rest.Storag
 		actions = appendIf(actions, action{"CONNECT", itemPath, nameParams, namer, false}, isConnecter)
 		actions = appendIf(actions, action{"CONNECT", itemPath + "/{path:*}", proxyParams, namer, false}, isConnecter && connectSubpath)
 		break
+	//如果该资源为namespaced, 例如deployment, pod, service...
 	case meta.RESTScopeNameNamespace:
 		// Handler for standard REST verbs (GET, PUT, POST and DELETE).
 		namespaceParam := ws.PathParameter(scope.ArgumentName(), scope.ParamDescription()).DataType("string")
+
+		// 可以猜测
+		// scope.ParaName() = "namespaces", scope.ArgumentName() = "namespace"
 		namespacedPath := scope.ParamName() + "/{" + scope.ArgumentName() + "}/" + resource
 		namespaceParams := []*restful.Parameter{namespaceParam}
 
+		// resourcePath = "/namespaces/{namespace}/deployments", 用来list资源
 		resourcePath := namespacedPath
 		resourceParams := namespaceParams
+
+		// itemPath = "/namespaces/{namespace}/deployments/{name}", 用来查询单个资源
+		// 在加上WebService的Root, 则就是/apis/apps/v1beta1/namespaces/{namespace}/deployments/{name}
 		itemPath := namespacedPath + "/{name}"
+
 		nameParams := append(namespaceParams, nameParam)
 		proxyParams := append(nameParams, pathParam)
 		itemPathSuffix := ""
@@ -449,6 +481,8 @@ func (a *APIInstaller) registerResourceHandlers(path string, storage rest.Storag
 			SelfLinkPathSuffix: itemPathSuffix,
 		}
 
+		//初始化针对该资源类型能进行的各种Verb, 注意此Verb并不一定和Method相同, 例如LIST,GET,WATCH对应的其实都是Get Method
+		//actions的功能就是为了将针对该资源的各种路由给注册到WebService中.
 		actions = appendIf(actions, action{"LIST", resourcePath, resourceParams, namer, false}, isLister)
 		actions = appendIf(actions, action{"POST", resourcePath, resourceParams, namer, false}, isCreater)
 		actions = appendIf(actions, action{"DELETECOLLECTION", resourcePath, resourceParams, namer, false}, isCollectionDeleter)
