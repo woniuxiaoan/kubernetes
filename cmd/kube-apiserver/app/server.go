@@ -157,6 +157,7 @@ func CreateServerChain(runOptions *options.ServerRunOptions, stopCh <-chan struc
 
 	// TPRs are enabled and not yet beta, since this these are the successor, they fall under the same enablement rule
 	// If additional API servers are added, they should be gated.
+	// 注册apiextensions.k8s.io/v1beta1下资源的对应路由, 即crd资源对应的路由
 	apiExtensionsConfig, err := createAPIExtensionsConfig(*kubeAPIServerConfig.GenericConfig, versionedInformers, pluginInitializer, runOptions)
 	if err != nil {
 		return nil, err
@@ -166,6 +167,7 @@ func CreateServerChain(runOptions *options.ServerRunOptions, stopCh <-chan struc
 		return nil, err
 	}
 
+	// 注册除去crd, aggregator之外的所有Group,Version对应资源的相关请求路由
 	kubeAPIServer, err := CreateKubeAPIServer(kubeAPIServerConfig, apiExtensionsServer.GenericAPIServer, sharedInformers, versionedInformers)
 	if err != nil {
 		return nil, err
@@ -192,6 +194,8 @@ func CreateServerChain(runOptions *options.ServerRunOptions, stopCh <-chan struc
 	apiExtensionsServer.GenericAPIServer.PrepareRun()
 
 	// aggregator comes last in the chain
+	// aggregator是aggregtor聚合层的相关路由注册, 用于扩展apiserver的功能. 此时apiserver就相当于一个代理, 当其受到一个请求后就会
+	// 将该请求转发至特定的服务
 	aggregatorConfig, err := createAggregatorConfig(*kubeAPIServerConfig.GenericConfig, runOptions, versionedInformers, serviceResolver, proxyTransport, pluginInitializer)
 	if err != nil {
 		return nil, err
