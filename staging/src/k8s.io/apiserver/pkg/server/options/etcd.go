@@ -204,6 +204,8 @@ func (f *SimpleRestOptionsFactory) GetRESTOptions(resource schema.GroupResource)
 		ResourcePrefix:          resource.Group + "/" + resource.Resource,
 		CountMetricPollPeriod:   f.Options.StorageConfig.CountMetricPollPeriod,
 	}
+
+	//如果enable了watch cache
 	if f.Options.EnableWatchCache {
 		sizes, err := ParseWatchCacheSizes(f.Options.WatchCacheSizes)
 		if err != nil {

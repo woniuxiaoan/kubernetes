@@ -294,6 +294,8 @@ func (cfg *Config) Complete(informers informers.SharedInformerFactory) Completed
 // Certain config fields will be set to a default value if unset.
 // Certain config fields must be specified, including:
 //   KubeletClientConfig
+
+// woooniuzhang apiserver的入口函数 level-1, 安装每个Group所对应的api, 例如extension组、batch组、apps组等等
 func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget) (*Master, error) {
 	if reflect.DeepEqual(c.ExtraConfig.KubeletClientConfig, kubeletclient.KubeletClientConfig{}) {
 		return nil, fmt.Errorf("Master.New() called with empty config.KubeletClientConfig")
@@ -354,6 +356,8 @@ func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget)
 		admissionregistrationrest.RESTStorageProvider{},
 		eventsrest.RESTStorageProvider{TTL: c.ExtraConfig.EventTTL},
 	}
+
+	// 安装各个Group对应资源的api, 其中每个restStorageProvider都表示一个单独的Group对应的Storage
 	m.InstallAPIs(c.ExtraConfig.APIResourceConfigSource, c.GenericConfig.RESTOptionsGetter, restStorageProviders...)
 
 	if c.ExtraConfig.Tunneler != nil {
@@ -414,6 +418,13 @@ func (m *Master) InstallAPIs(apiResourceConfigSource serverstorage.APIResourceCo
 
 		//每个Group会有多个不同的Version, 例如v1/v1beta1/v1beta2等等
 		//apiGroupInfo里面包含GroupVersion信息, 例如apps/v1beta1
+		//同时apiGroupInfo.VersionedResourcesStorageMap记录了该组某个版本下,资源<>资源storage的对应关系, 例如
+		/*
+			VersionedResourcesStorageMap["v1beta1"] = {
+				“deployment”: deploymentStore，
+				"deployments/status": deploymentstatusStore,
+			}
+		*/
 		apiGroupInfo, enabled := restStorageBuilder.NewRESTStorage(apiResourceConfigSource, restOptionsGetter)
 		if !enabled {
 			glog.Warningf("Problem initializing API group %q, skipping.", groupName)
