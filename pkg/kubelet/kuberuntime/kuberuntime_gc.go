@@ -390,9 +390,10 @@ func (cgc *containerGC) evictPodLogsDirectories(allSourcesReady bool) error {
 // /opt/docker/containers下面的log文件是docker daemon自己的log文件, 和kubernetes无关, 所以kubelet GC不会对此文件件做操作
 // 当kubelet调用docker daemon接口删除容器时, /opt/docker/containers对应的container log会被删除. 也就是将kubelet是简介通过docker 删除的该文件夹下log
 // 而不是直接管理删除的.
+// woooniuzhang Kubelet 垃圾回收
 func (cgc *containerGC) GarbageCollect(gcPolicy kubecontainer.ContainerGCPolicy, allSourcesReady bool, evictTerminatedPods bool) error {
 	// Remove evictable containers
-	// 按照设定的标准, 清除Pod中每个container的超额容器
+	// 按照设定的标准, 清除Pod中每个container的超额容器, 注意这里的container不包含sandbox
 	// 通过该操作也会清除该container的对应log, 包括:
 	//   1. /var/log/pods/{podUID}/{containerName}/{restartCounter}.log, 注意该log是/opt/docker/containers/{containerID}/xxx.log的软链
 	//   2. /var/log/containers/(podName + podNamespace + containerName + containerID).log, 注意该log是上面log的软链

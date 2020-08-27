@@ -271,8 +271,12 @@ func (ds *dockerService) StopContainer(_ context.Context, r *runtimeapi.StopCont
 // RemoveContainer removes the container.
 func (ds *dockerService) RemoveContainer(_ context.Context, r *runtimeapi.RemoveContainerRequest) (*runtimeapi.RemoveContainerResponse, error) {
 	// Ideally, log lifecycle should be independent of container lifecycle.
-	// However, docker will remove container log after container is removed,
+	// However, docker will remove container log after container is removed
 	// we can't prevent that now, so we also clean up the symlink here.
+
+	//从上面可以知道,docker api在删除container后会一并删除它的log, 注意这个log是实打实的log.
+	//所以在删除container之前, 需要删除该log所有的软链, 即symlink. 这些symlink是kubernetes来进行维护的.
+	//目的是可以更直观的找到某个容器所对应log
 	err := ds.removeContainerLogSymlink(r.ContainerId)
 	if err != nil {
 		return nil, err
