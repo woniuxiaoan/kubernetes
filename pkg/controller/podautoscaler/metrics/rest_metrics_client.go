@@ -102,10 +102,10 @@ type customMetricsClient struct {
 // GetRawMetric gets the given metric (and an associated oldest timestamp)
 // for all pods matching the specified selector in the given namespace
 // res最后大体格式就是 res[podName] = metricNameValue
-// selector已经是scaleTargetRef对象所对应的selector，利用这个这个找到对应的pod
-//
+// selector已经是scaleTargetRef对象所对应的selector，利用这个找到对应的pod
 func (c *customMetricsClient) GetRawMetric(metricName string, namespace string, selector labels.Selector) (PodMetricsInfo, time.Time, error) {
-	// 它其实是调用了 /apis/custom.metrics.k8s.io/namespaces/{namespace}/pods/*/{metricName} 这个接口
+	// 它其实是调用了 /apis/custom.metrics.k8s.io/v1beta1/namespaces/{namespace}/pods/*/{metricName} 这个接口
+	// 例如 /apis/custom.metrics.k8s.io/v1beta1/namespaces/ivanka/pods/*/k8s_pod_rate_cpu_core_used_limit
 	metrics, err := c.client.NamespacedMetrics(namespace).GetForObjects(schema.GroupKind{Kind: "Pod"}, selector, metricName)
 	if err != nil {
 		return nil, time.Time{}, fmt.Errorf("unable to fetch metrics from custom metrics API: %v", err)
@@ -117,6 +117,7 @@ func (c *customMetricsClient) GetRawMetric(metricName string, namespace string, 
 
 	res := make(PodMetricsInfo, len(metrics.Items))
 	for _, m := range metrics.Items {
+		//m.DescribedObject.Name即PodName, m.Value.MilliValue为监控值
 		res[m.DescribedObject.Name] = m.Value.MilliValue()
 	}
 

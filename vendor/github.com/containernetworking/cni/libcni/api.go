@@ -120,9 +120,11 @@ func injectRuntimeConfig(orig *NetworkConfig, rt *RuntimeConf) (*NetworkConfig, 
 }
 
 // AddNetworkList executes a sequence of plugins with the ADD command
+// 每种网络设置都需要多个插件配合, 插件不同功能也不一样, 才最终完成整体的网络设置
 func (c *CNIConfig) AddNetworkList(list *NetworkConfigList, rt *RuntimeConf) (types.Result, error) {
 	var prevResult types.Result
-	//按照顺序执行配置文件中每个插件的ADD命令
+	// 按照顺序执行配置文件中每个插件的ADD命令
+	// 在c.Path中寻找满足net.Network.Type的命令, 并返回路径
 	for _, net := range list.Plugins {
 		pluginPath, err := invoke.FindInPath(net.Network.Type, c.Path)
 		if err != nil {
@@ -170,6 +172,10 @@ func (c *CNIConfig) DelNetworkList(list *NetworkConfigList, rt *RuntimeConf) err
 // AddNetwork executes the plugin with the ADD command
 // 执行所找到插件的ADD命令
 func (c *CNIConfig) AddNetwork(net *NetworkConfig, rt *RuntimeConf) (types.Result, error) {
+	// 已loopback为例:
+	// c.Path := []string{"/opt/loopback/bin","/opt/cni/bin"}
+	// n.Network.Type = loopback
+	// 在c.Path中找满足net.Network.Type的插件, 本例即寻找/opt/cni/bin/loopback
 	pluginPath, err := invoke.FindInPath(net.Network.Type, c.Path)
 	if err != nil {
 		return nil, err

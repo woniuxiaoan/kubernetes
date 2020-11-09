@@ -41,8 +41,8 @@ func getLoNetwork(binDir, vendorDirPrefix string) *cniNetwork {
 		panic(err)
 	}
 	cninet := &libcni.CNIConfig{
-		// %s/opt/%s/bin , 默认vendorDirPrefix == “/opt/cni/bin”
-		// 每个path都是一个独立的， Path = []string{"/opt/loopback/bin", /opt/cni/bin}
+		// 默认binDir == “/opt/cni/bin”
+		// Path = []string{"/opt/loopback/bin", /opt/cni/bin}
 		Path: []string{vendorCNIDir(vendorDirPrefix, "loopback"), binDir},
 	}
 	loNetwork := &cniNetwork{

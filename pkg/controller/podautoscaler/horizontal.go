@@ -77,6 +77,7 @@ type HorizontalController struct {
 }
 
 // NewHorizontalController creates a new HorizontalController.
+// woooniuzhang hpa 创建一个新的hpa控制器
 func NewHorizontalController(
 	evtNamespacer v1core.EventsGetter,
 	scaleNamespacer scaleclient.ScalesGetter,
@@ -456,13 +457,14 @@ func (a *HorizontalController) reconcileAutoscaler(hpav1Shared *autoscalingv1.Ho
 	} else if currentReplicas > hpa.Spec.MaxReplicas {
 		rescaleReason = "Current number of replicas above Spec.MaxReplicas"
 		desiredReplicas = hpa.Spec.MaxReplicas
+		// 如果当前实例数 < MinReplicas, 则调整至MinReplicas
 	} else if hpa.Spec.MinReplicas != nil && currentReplicas < *hpa.Spec.MinReplicas {
 		rescaleReason = "Current number of replicas below Spec.MinReplicas"
 		desiredReplicas = *hpa.Spec.MinReplicas
 	} else if currentReplicas == 0 {
 		rescaleReason = "Current number of replicas must be greater than 0"
 		desiredReplicas = 1
-	} else { // 这个状态就是 hpa.Spec.MinReplicas < currentReplicas < hpa.Spec.MaxReplicas
+	} else { // 这个状态就是 hpa.Spec.MinReplicas <= currentReplicas <= hpa.Spec.MaxReplicas
 		metricDesiredReplicas, metricName, metricStatuses, metricTimestamp, err = a.computeReplicasForMetrics(hpa, scale, hpa.Spec.Metrics)
 		if err != nil {
 			a.setCurrentReplicasInStatus(hpa, currentReplicas)

@@ -358,10 +358,13 @@ func (ds *dockerService) UpdateRuntimeConfig(_ context.Context, r *runtimeapi.Up
 // to map non-sandbox IDs to their respective sandboxes.
 // 根据podSandboxID 获取其所在的network namespace的path, 其内部还是通过调用dockerd daemon的http接口实现
 func (ds *dockerService) GetNetNS(podSandboxID string) (string, error) {
+	// curl --unix-socket /var/run/docker.sock http://v1.31/containers/{containerID}/json, 拿到该容器的详情
+	// r.State.Pid为容器对应的宿主机进程
 	r, err := ds.client.InspectContainer(podSandboxID)
 	if err != nil {
 		return "", err
 	}
+	// helper_linux.go, 结果为/proc/{Pid}/ns/net
 	return getNetworkNamespace(r)
 }
 

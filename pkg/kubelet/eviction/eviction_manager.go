@@ -220,6 +220,7 @@ func startMemoryThresholdNotifier(thresholds []evictionapi.Threshold, observatio
 
 // synchronize is the main control loop that enforces eviction thresholds.
 // Returns the pod that was killed, or nil if no pod was killed.
+// kubelet驱逐的主要逻辑
 func (m *managerImpl) synchronize(diskInfoProvider DiskInfoProvider, podFunc ActivePodsFunc) []*v1.Pod {
 	// if we have nothing to do, just return
 	thresholds := m.config.Thresholds
@@ -231,6 +232,7 @@ func (m *managerImpl) synchronize(diskInfoProvider DiskInfoProvider, podFunc Act
 	// build the ranking functions (if not yet known)
 	// TODO: have a function in cadvisor that lets us know if global housekeeping has completed
 	if m.dedicatedImageFs == nil {
+		//判断该节点是否有独立的ImageFs, 如果出错则本轮synchronize结束, 等待下一轮
 		hasImageFs, ok := diskInfoProvider.HasDedicatedImageFs()
 		if ok != nil {
 			return nil
@@ -240,6 +242,7 @@ func (m *managerImpl) synchronize(diskInfoProvider DiskInfoProvider, podFunc Act
 		m.resourceToNodeReclaimFuncs = buildResourceToNodeReclaimFuncs(m.imageGC, m.containerGC, hasImageFs)
 	}
 
+	// 获取当前节点获取的pods
 	activePods := podFunc()
 	updateStats := true
 	summary, err := m.summaryProvider.Get(updateStats)

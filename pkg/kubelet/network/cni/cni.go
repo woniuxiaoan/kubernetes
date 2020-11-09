@@ -70,12 +70,14 @@ type cniPortMapping struct {
 	HostIP        string `json:"hostIP"`
 }
 
+//pulginDir = /etc/cni/net.d, binDir = /opt/cni/bin
 func probeNetworkPluginsWithVendorCNIDirPrefix(pluginDir, binDir, vendorCNIDirPrefix string) []network.NetworkPlugin {
 	if binDir == "" {
 		binDir = DefaultCNIDir
 	}
 	plugin := &cniNetworkPlugin{
 		defaultNetwork:     nil,
+		//设定本地网络
 		loNetwork:          getLoNetwork(binDir, vendorCNIDirPrefix),
 		execer:             utilexec.New(),
 		pluginDir:          pluginDir,
@@ -137,7 +139,7 @@ func getDefaultCNINetwork(pluginDir, binDir, vendorCNIDirPrefix string) (*cniNet
 			}
 		}
 
-		//最终取哪个plugin是不为空的配置文件
+		//最终取plugin不为空的配置文件
 		if len(confList.Plugins) == 0 {
 			glog.Warningf("CNI config list %s has no networks, skipping", confFile)
 			continue
@@ -171,6 +173,7 @@ func (plugin *cniNetworkPlugin) Init(host network.Host, hairpinMode kubeletconfi
 	return nil
 }
 
+//从指定文件夹中需要满足条件的网络配置文件来初始化默认网络
 func (plugin *cniNetworkPlugin) syncNetworkConfig() {
 	network, err := getDefaultCNINetwork(plugin.pluginDir, plugin.binDir, plugin.vendorCNIDirPrefix)
 	if err != nil {
@@ -219,8 +222,9 @@ func (plugin *cniNetworkPlugin) SetUpPod(namespace string, name string, id kubec
 		return err
 	}
 
-	// 获取容器所在的network namespace路径, 即/proc/{sandbox_pid}/ns/net, 该文件为一个软链
-	// 该步骤是通过调用 docker-http-client实现的
+	// 获取容器所在的network namespace路径, 即/proc/{sandbox_pid}/ns/net, 该文件为一个软链, 该步骤是通过调用 docker-http-client实现的
+	// pkg/kubelet/dockershim/docker_service.go GetNetNS, line360
+	// netnsPath = /proc/{Pid}/ns/net
 	netnsPath, err := plugin.host.GetNetNS(id.ID)
 	if err != nil {
 		return fmt.Errorf("CNI failed to retrieve network namespace path: %v", err)
@@ -231,6 +235,11 @@ func (plugin *cniNetworkPlugin) SetUpPod(namespace string, name string, id kubec
 	if plugin.loNetwork != nil {
 		// 依次执行plugin.loNetwork.NetworkConfig.Plugins里面各个插件的ADD命令
 		// 最终执行的是/opt/cni/bin/loopback ADD xxx 这样一个命令
+		// params:
+		// name: pod的name
+		// namespace: pod的namespace
+		// id: 容器ID
+		// netnsPath: 容器进程对应的network namespace路径
 		if _, err = plugin.addToNetwork(plugin.loNetwork, name, namespace, id, netnsPath); err != nil {
 			glog.Errorf("Error while adding to cni lo network: %s", err)
 			return err
@@ -268,7 +277,7 @@ func (plugin *cniNetworkPlugin) TearDownPod(namespace string, name string, id ku
 	return plugin.deleteFromNetwork(plugin.getDefaultNetwork(), name, namespace, id, netnsPath)
 }
 
-// 依次执行network.NetworkConfig.Plugins里面各个插件的ADD命令
+// 依次执行配置文件中plugins里面设定的各个插件的ADD命令
 func (plugin *cniNetworkPlugin) addToNetwork(network *cniNetwork, podName string, podNamespace string, podSandboxID kubecontainer.ContainerID, podNetnsPath string) (cnitypes.Result, error) {
 	rt, err := plugin.buildCNIRuntimeConf(podName, podNamespace, podSandboxID, podNetnsPath)
 	if err != nil {
@@ -308,6 +317,9 @@ func (plugin *cniNetworkPlugin) deleteFromNetwork(network *cniNetwork, podName s
 	return nil
 }
 
+// 构建初始化网络时用到的参数: 主要包括PodName, PodNamespace, ContainerID 以及 PodNetnsPath
+// podNetnsPath: Pod所在的network namespace, 即infra容器所在的network namespace路径
+// containerID: 容器ID
 func (plugin *cniNetworkPlugin) buildCNIRuntimeConf(podName string, podNs string, podSandboxID kubecontainer.ContainerID, podNetnsPath string) (*libcni.RuntimeConf, error) {
 	glog.V(4).Infof("Got netns path %v", podNetnsPath)
 	glog.V(4).Infof("Using podns path %v", podNs)

@@ -214,6 +214,8 @@ func (c *ReplicaCalculator) calcPlainMetricReplicas(metrics metricsclient.PodMet
 
 	//将拿到的pod分为三类, readyPods, unreadyPods, missingPods
 	for _, pod := range podList.Items {
+
+		//即只有Pod.Phase == Running && ready Condition的值为"True"时, 该Pod才为readyPods
 		if pod.Status.Phase != v1.PodRunning || !podutil.IsPodReady(&pod) {
 			// save this pod name for later, but pretend it doesn't exist for now
 			unreadyPods.Insert(pod.Name)
